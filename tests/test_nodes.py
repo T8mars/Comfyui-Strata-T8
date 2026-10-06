@@ -245,7 +245,7 @@ class Structured(unittest.TestCase):
             generate.assert_not_called()
         with mock.patch.object(core, 'generate', return_value=[('invalid', '', '{}')]) as generate:
             with self.assertRaises(nodes.StructuredOutputError):
-                nodes.StrataStructured().run(core.Connection('test'), 'hi', schema='{}', repair_attempts=2)
+                nodes.StrataStructured().run(core.Connection('test'), 'hi', schema='{"type":"object"}', repair_attempts=2)
             self.assertEqual(generate.call_count, 3)
         for source in ('NaN', 'Infinity', '-Infinity'):
             with self.assertRaises(nodes.StructuredOutputError): nodes.validated(source, {'type': 'number'})

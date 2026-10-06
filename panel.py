@@ -22,7 +22,8 @@ def register():
             raise web.HTTPForbidden(text='Invalid local Origin') from None
         if request.remote not in ('127.0.0.1', '::1') or host not in ('127.0.0.1', 'localhost', '::1'):
             raise web.HTTPForbidden(text='Strata profile controls require a loopback ComfyUI connection')
-        if parsed_origin and (parsed_origin.netloc != request.host or parsed_origin.scheme != request.scheme):
+        if parsed_origin and (parsed_origin.netloc != request.host or parsed_origin.scheme != request.scheme
+                              or parsed_origin.path or parsed_origin.query or parsed_origin.fragment):
             raise web.HTTPForbidden(text='Foreign Origin')
         if post and request.content_type != 'application/json':
             raise web.HTTPUnsupportedMediaType(text='Use application/json')
@@ -46,7 +47,7 @@ def register():
     async def set_profile(request):
         local(request, True)
         try:
-            body = await request.json()
+            body = await request.json(loads=core.json_loads)
             if not isinstance(body, dict) or not isinstance(body.get('name'), str) or not isinstance(body.get('profile'), dict):
                 raise core.StrataError('Provide a profile name and JSON profile object')
             await asyncio.to_thread(core.save_profile, body['name'], body['profile'])
@@ -60,7 +61,7 @@ def register():
     async def control(request):
         local(request, True)
         try:
-            body = await request.json()
+            body = await request.json(loads=core.json_loads)
             if not isinstance(body, dict) or not isinstance(body.get('name'), str) or body.get('action') not in ('start', 'status', 'load', 'unload', 'stop'):
                 raise core.StrataError('Provide a profile name and known control action')
             if body['action'] != 'status':

@@ -56,19 +56,25 @@ function renderPanel(container) {
     refresh.onclick=reload;
     container.append(select,refresh,name,fields,key,clearLabel);
     const save=document.createElement("button"); save.textContent="保存配置";
-    save.onclick=async()=>{++reloadGeneration;for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=true;try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;await reload();}catch(error){report(error);}finally{for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=false;}};
+    const actionButtons=[],activeActions=new Set();let saving=false;
+    function updateDisabled(){
+        for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=saving;
+        for(const button of actionButtons)button.disabled=saving || activeActions.has(button);
+    }
+    save.onclick=async()=>{++reloadGeneration;saving=true;updateDisabled();try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;await reload();}catch(error){report(error);}finally{saving=false;updateDisabled();}};
     container.append(save);
     const actions=document.createElement("div");
     actions.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0";
     for(const [action,label] of [["start","启动"],["status","状态"],["load","加载"],["unload","卸载"],["stop","停止托管服务"]]) {
         const button=document.createElement("button");button.textContent=label;
-        button.onclick=async()=>{button.disabled=true;status.textContent="处理中…";try{
+        actionButtons.push(button);
+        button.onclick=async()=>{activeActions.add(button);updateDisabled();status.textContent="处理中…";try{
             if(action!=="status") {
                 const queued=await request("/prompt",{client_id:api.clientId,prompt:{"1":{class_type:"StrataT8Connection",inputs:{profile:name.value}},"2":{class_type:"StrataT8Control",inputs:{connection:["1",0],action}}}});
                 if(typeof queued.prompt_id!=="string" || !queued.prompt_id) throw new Error("ComfyUI 未返回队列任务 ID；服务操作未确认入队。");
                 status.textContent=JSON.stringify(queued,null,2)+"\n服务操作已进入 ComfyUI 队列；同卡加载验证返回前会释放显存。";
             } else status.textContent=JSON.stringify(await request("/strata_t8/control",{name:name.value,action}),null,2);
-        }catch(error){report(error);}finally{button.disabled=false;}};
+        }catch(error){report(error);}finally{activeActions.delete(button);updateDisabled();}};
         actions.append(button);
     }
     container.append(actions,status); reload();

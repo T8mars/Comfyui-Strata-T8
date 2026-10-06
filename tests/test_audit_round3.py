@@ -25,7 +25,7 @@ class SchemaRecovery(unittest.TestCase):
                 nodes.validated('{}', schema)
         with mock.patch.object(core, 'generate', return_value=[('{}','','{}')]) as generate:
             with self.assertRaises(nodes.StructuredOutputError):
-                nodes.StrataStructured().run(core.Connection('test'), 'hi', schema='{"$ref":"#"}', repair_attempts=1)
+                nodes.StrataStructured().run(core.Connection('test'), 'hi', schema='{"type":"object","$ref":"#"}', repair_attempts=1)
             self.assertEqual(generate.call_count, 2)
 
     def test_structured_schema_requires_text_before_any_model_work(self):

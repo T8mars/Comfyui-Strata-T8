@@ -41,6 +41,8 @@
 
 refresh 改变时重新生成，其他相同输入使用 ComfyUI 缓存；Control 每次执行。top_k 范围 1–64，top_p >0；seed 不承诺自适应专家模式下逐字一致。结构化输出是生成后校验，可设 0–2 次修复，格式失败明确报错。
 
+Structured 和 Vision 的非空 JSON Schema 必须显式声明根 `type:object`。支持 Draft 4、7、2019-09、2020-12；不声明草案时按 2020-12 校验，引用仅限当前 Schema 中的本地目标。Vision 留空 Schema 使用普通图片分析，填入 JSON null 或 boolean 不能代替留空。Schema、历史、档案、结构化输出中的重复 JSON 成员均拒绝，不采用后一个值覆盖前一个值。
+
 面板“启动/加载/卸载/停止”都进入 ComfyUI 队列；状态查询直接读取。同卡 Control 完成加载验证后释放资源再返回，HTTP 服务继续待命；非同卡可显式保持载入。原生 STRING 列表使下游逐项执行，STRATA_TEXT_LIST 将整批交给 Batch。
 
 ## 三个示例

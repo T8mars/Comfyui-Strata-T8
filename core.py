@@ -26,7 +26,7 @@ class StrataError(RuntimeError):
 
 
 def json_loads(text):
-    """Reject both non-JSON constants and finite-looking exponents that overflow float."""
+    """Reject ambiguous members, non-JSON constants and numbers that overflow float."""
     def number(value):
         parsed = float(value)
         if not math.isfinite(parsed):
@@ -34,10 +34,17 @@ def json_loads(text):
         return parsed
     def constant(value):
         raise ValueError('Non-finite JSON number')
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError('Duplicate JSON member')
+            value[key] = item
+        return value
     try:
-        return json.loads(text, parse_float=number, parse_constant=constant)
+        return json.loads(text, parse_float=number, parse_constant=constant, object_pairs_hook=pairs)
     except (TypeError, ValueError, RecursionError):
-        raise StrataError('Invalid JSON: use valid JSON text with finite numbers') from None
+        raise StrataError('Invalid JSON: use unique member names and finite numbers') from None
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,8 @@ def profile_path(name):
 def profiles():
     names = []
     for path in (HOME/'profiles').glob('*.json'):
+        if not path.is_file():
+            continue
         try:
             profile_path(path.stem)
         except StrataError:
@@ -417,11 +426,12 @@ class Managed:
         if not self.state_path.is_file():
             return None
         try:
-            state = json.loads(self.state_path.read_text(encoding='utf-8'))
-            if (type(state['pid']) is not int or state['pid'] <= 0 or isinstance(state['created'], bool)
-                    or not isinstance(state['created'], (int, float)) or not math.isfinite(state['created'])):
+            state = json_loads(self.state_path.read_text(encoding='utf-8'))
+            if (type(state['pid']) is not int or not 0 < state['pid'] <= 2**32-1 or isinstance(state['created'], bool)
+                    or not isinstance(state['created'], (int, float)) or not 0 <= state['created'] <= 10**12
+                    or not math.isfinite(state['created'])):
                 raise ValueError()
-        except (OSError, ValueError, TypeError, KeyError):
+        except (OSError, ValueError, TypeError, KeyError, StrataError):
             raise StrataError('Invalid owned-service record; resource ownership cannot be confirmed') from None
         try:
             proc = psutil.Process(state['pid'])
@@ -450,7 +460,7 @@ class Managed:
             return proc
         except psutil.AccessDenied:
             raise StrataError('Cannot verify owned service identity; resource ownership cannot be confirmed') from None
-        except (psutil.Error, OSError, ValueError, TypeError, IndexError):
+        except (psutil.Error, OSError, ValueError, TypeError, IndexError, OverflowError):
             return None
 
     def stop(self):
@@ -674,7 +684,15 @@ def _generate(connection, requests):
                 raise StrataError('Strata is busy with another request; retry after it finishes')
             cleanup_required = bool(profile.get('allow_lifecycle'))
             if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
-                cleanup(client, profile, manager, None)
+                if cleanup(client, profile, manager, None):
+                    # A confirmed fallback stop invalidates the old HTTP/model identity.
+                    status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile))
+                    service_status(status)
+                    if status['activity']['in_flight']:
+                        cleanup_required = False  # Do not unload another active request.
+                        raise StrataError('Strata is busy with another request; retry after it finishes')
+                    if status['concurrency']['serving'] != 1:
+                        raise StrataError('Same-GPU mode requires parallel=1')
             baseline = gpu_handoff(profile) if profile.get('same_gpu') else None
             answers = []
             for request in requests:
@@ -734,7 +752,10 @@ def _control(connection, action, check=interrupted):
                 raise StrataError('Same-GPU mode requires parallel=1')
             if status.get('protocol_version') != 1 or status['activity']['in_flight']:
                 raise StrataError('Load requires an idle compatible Strata-T8 service')
-            cleanup(client, profile, manager, None)
+            if cleanup(client, profile, manager, None):
+                status = service_status(manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile)))
+                if status['concurrency']['serving'] != 1 or status['activity']['in_flight']:
+                    raise StrataError('Load requires an idle compatible Strata-T8 service with parallel=1')
         baseline = gpu_handoff(profile) if action == 'load' and profile.get('same_gpu') else None
         status = None
         try:
@@ -746,7 +767,8 @@ def _control(connection, action, check=interrupted):
             status = client.request('/v1/status', timeout=5, check=check)
         finally:
             if action == 'load' and (profile.get('same_gpu') or status is None) and profile.get('allow_lifecycle'):
-                cleanup(client, profile, manager, baseline)
+                stopped = cleanup(client, profile, manager, baseline)
                 if status is not None:
-                    status['after_release'] = client.request('/v1/status', timeout=5, check=None)
+                    status['after_release'] = ({'service':'strata','stopped':True,'released':True} if stopped
+                                               else client.request('/v1/status', timeout=5, check=None))
         return status

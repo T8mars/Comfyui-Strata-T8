@@ -1,9 +1,7 @@
-## Strata-T8 ComfyUI 1.0.2
+## Strata-T8 ComfyUI 1.0.3
 
-第三组 20 轮联合检查，修复 13 类问题、新增 21 例；完整节点回归 105 例通过。修复循环 Schema 异常、档案非法扩展值、托管 argv 归属和 readiness 回滚、卸载兜底、同卡预清理、HTTP 截断响应、timeout 边界及极窄图片像素限制。
+第四组 20 轮联合检查，修复 9 类问题、新增 26 例；完整节点回归 131 例通过。按 JSON Schema 声明选择草案，提前检查服务要求的 object 根；拒绝重复 JSON 成员。修复同卡清理停止服务后未重启、Control 成功释放后查询死亡端口、owner 巨整数、目录误列为档案、Origin 格式及面板保存与队列动作并发。
 
-面板刷新保留草稿，过期响应不覆盖新状态；新增明确的 API key 清除选项，external 清空旧 key，managed 重新生成。官方 ComfyUI V3 API/CPU tensor、动态档案选项及 PNG 探针通过。保留 10 个稳定节点 ID、V3/V1 和协议 1。
-
-保留 10 个节点 ID 和 Strata-T8 协议 1。模型、运行包及本机连接档案独立保存。
+Structured 和 Vision 非空 Schema 根须显式写 type:object；Vision 留空仍为普通图片分析。保留 10 个节点 ID、V3/V1 适配和 Strata-T8 协议 1。模型、运行包及本机连接档案独立保存；建议同时更新 Strata-T8 运行包。
 
 通过 ComfyUI-Manager / Comfy Registry（Publisher `t8star`，节点 `strata-t8`）管理版本；也提供不含模型和运行环境的节点 ZIP 与 SHA256。安装、模型路径、下载来源与致谢见 README。

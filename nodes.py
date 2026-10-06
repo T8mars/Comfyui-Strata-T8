@@ -64,16 +64,22 @@ def request(prompt, system='', history='[]', **options):
 
 def check_schema(schema):
     from jsonschema import Draft202012Validator, SchemaError
-    from referencing import Registry
-    from referencing.exceptions import Unresolvable
-    from referencing.jsonschema import DRAFT202012
+    from jsonschema.validators import validator_for
+    from referencing import Registry, Resource
+    from referencing.exceptions import Unresolvable, NoSuchResource, CannotDetermineSpecification
+    from referencing.jsonschema import DRAFT202012, specification_with, UnknownDialect
+    if not isinstance(schema, (dict, bool)):
+        raise core.StrataError('Invalid JSON Schema')
+    validator_cls = validator_for(schema, default=Draft202012Validator)
     try:
-        Draft202012Validator.check_schema(schema)
+        validator_cls.check_schema(schema)
     except (SchemaError, RecursionError):
         raise core.StrataError('Invalid JSON Schema') from None
     # No HTTP/file reference retrieval in schemas supplied by a workflow.
-    root = DRAFT202012.create_resource(schema)
-    resolver = Registry().with_resource('', root).crawl().resolver_with_root(root)
+    specification = specification_with(validator_cls.META_SCHEMA['$schema'], default=DRAFT202012)
+    def no_remote(uri):
+        raise NoSuchResource(ref=uri)
+    registry = Registry(retrieve=no_remote)
     visited = set()
     def local_refs(resource, scoped):
         value = resource.contents
@@ -81,8 +87,9 @@ def check_schema(schema):
             return
         visited.add(id(value))
         if isinstance(value, dict):
-            for key in ('$ref', '$dynamicRef'):
-                if key not in value:
+            current_cls = validator_for(value, default=validator_cls)
+            for key in ('$ref', '$dynamicRef', '$recursiveRef'):
+                if key not in value or key not in current_cls.VALIDATORS:
                     continue
                 reference = value[key]
                 if not reference.startswith('#'):
@@ -92,18 +99,29 @@ def check_schema(schema):
                 except Unresolvable:
                     raise core.StrataError('JSON Schema local reference does not identify an existing schema') from None
                 try:
-                    Draft202012Validator.check_schema(resolved.contents)
+                    validator_for(resolved.contents, default=current_cls).check_schema(resolved.contents)
                 except SchemaError:
                     raise core.StrataError('JSON Schema local reference must identify a valid schema') from None
                 # A pointer may make const/enum data into an executable schema; validate that target too.
-                local_refs(DRAFT202012.create_resource(resolved.contents), resolved.resolver)
+                local_refs(Resource.from_contents(resolved.contents, default_specification=specification), resolved.resolver)
         # Follow schema-valued keywords only; $ref fields in const/enum are ordinary data.
         for child in resource.subresources():
             local_refs(child, scoped.in_subresource(child))
     try:
+        root = Resource.from_contents(schema, default_specification=specification)
+        resolver = registry.with_resource('', root).crawl().resolver_with_root(root)
         local_refs(root, resolver)
     except RecursionError:
         raise core.StrataError('JSON Schema is too deeply nested') from None
+    except (CannotDetermineSpecification, UnknownDialect):
+        raise core.StrataError('Unsupported JSON Schema dialect') from None
+    return validator_cls(schema, registry=registry)
+
+
+def check_service_schema(schema):
+    check_schema(schema)
+    if not isinstance(schema, dict) or schema.get('type') != 'object':
+        raise core.StrataError('Strata protocol 1 requires a JSON Schema root with type object')
 
 
 class StructuredOutputError(core.StrataError):
@@ -111,12 +129,13 @@ class StructuredOutputError(core.StrataError):
 
 
 def validated(text, schema):
-    from jsonschema import Draft202012Validator, ValidationError
-    check_schema(schema)
+    from jsonschema import ValidationError
+    from referencing.exceptions import Unresolvable
+    validator = check_schema(schema)
     try:
         value = core.json_loads(text)
-        Draft202012Validator(schema).validate(value)
-    except (core.StrataError, ValueError, ValidationError, RecursionError):
+        validator.validate(value)
+    except (core.StrataError, ValueError, ValidationError, RecursionError, Unresolvable):
         raise StructuredOutputError('Model output is not valid JSON matching the schema') from None
     return value
 
@@ -205,7 +224,7 @@ class StrataStructured(Base):
             raise core.StrataError('JSON Schema must be text')
         schema = core.json_loads(schema) if schema.strip() else STORY_SCHEMA
         # Validate schema before contacting/loading a model.
-        check_schema(schema)
+        check_service_schema(schema)
         req = request(prompt, system, **options)
         req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'strata_output', 'schema': schema}}
         for attempt in range(repair_attempts+1):
@@ -315,8 +334,8 @@ class StrataImage(Base):
         if not isinstance(schema, str):
             raise core.StrataError('JSON Schema must be text')
         parsed = core.json_loads(schema) if schema.strip() else None
-        if parsed is not None:
-            check_schema(parsed)
+        if schema.strip():
+            check_service_schema(parsed)
             req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'image_analysis', 'schema': parsed}}
         encoded = core.encode_images(images, max_pixels=max_pixels)
         req['messages'][-1]['content'] = [{'type': 'text', 'text': question or selected},
