@@ -1,7 +1,7 @@
-## Strata-T8 ComfyUI 1.0.3
+## Strata-T8 ComfyUI 1.0.4
 
-第四组 20 轮联合检查，修复 9 类问题、新增 26 例；完整节点回归 131 例通过。按 JSON Schema 声明选择草案，提前检查服务要求的 object 根；拒绝重复 JSON 成员。修复同卡清理停止服务后未重启、Control 成功释放后查询死亡端口、owner 巨整数、目录误列为档案、Origin 格式及面板保存与队列动作并发。
+第五组 20 轮联合检查，修复 9 类问题，新增 29 例；完整节点回归 160 例通过。修复嵌套 Schema 草案与引用继承、无效 Unicode、响应 framing 与大小预检、Windows HTTP 等待期间取消、未确认子进程归属和非同卡 Control 预检。配置面板刷新保留已有草稿，并保护异步操作的最新状态。旧草案混合 dependencies 的特定 anchor 组合提前报错，可改用 JSON Pointer。
 
-Structured 和 Vision 非空 Schema 根须显式写 type:object；Vision 留空仍为普通图片分析。保留 10 个节点 ID、V3/V1 适配和 Strata-T8 协议 1。模型、运行包及本机连接档案独立保存；建议同时更新 Strata-T8 运行包。
+保留 10 个节点 ID、ComfyUI V3/V1 接口及三类工作流：文字提示词、图像理解、结构化分镜和批处理。配套运行包为 Strata-T8 0.1.39-t8.12；模型安装、路径、来源和致谢见 README。节点 ZIP 不包含模型、Python 或运行环境。
 
-通过 ComfyUI-Manager / Comfy Registry（Publisher `t8star`，节点 `strata-t8`）管理版本；也提供不含模型和运行环境的节点 ZIP 与 SHA256。安装、模型路径、下载来源与致谢见 README。
+Publisher `t8star`、节点 `strata-t8`，通过官方 Comfy Registry 发布流程提交；Registry 审核状态以平台为准，审核期间可安装 GitHub Release。逐轮证据见 docs/AUDIT-20-ROUND5-NODES.md。

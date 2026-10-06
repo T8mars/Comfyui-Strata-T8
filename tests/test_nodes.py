@@ -316,6 +316,7 @@ class Transport(unittest.TestCase):
         sock = mock.Mock()
         sock.shutdown.side_effect = lambda _: released.set()
         response = mock.Mock(status=status)
+        response.getheaders.return_value = []
         response.read.side_effect = lambda _: (released.wait(2) if stalled else None) or raw
         if stalled:
             def read(_):

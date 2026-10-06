@@ -42,9 +42,19 @@ def json_loads(text):
             value[key] = item
         return value
     try:
-        return json.loads(text, parse_float=number, parse_constant=constant, object_pairs_hook=pairs)
+        value = json.loads(text, parse_float=number, parse_constant=constant, object_pairs_hook=pairs)
+        # Escaped lone UTF-16 surrogates parse successfully but cannot be sent to ComfyUI as UTF-8.
+        json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8')
+        return value
     except (TypeError, ValueError, RecursionError):
-        raise StrataError('Invalid JSON: use unique member names and finite numbers') from None
+        raise StrataError('Invalid JSON: use unique member names, valid Unicode and finite numbers') from None
+
+
+def text_unicode(value):
+    try:
+        value.encode('utf-8')
+    except UnicodeError:
+        raise StrataError('Text must contain valid Unicode characters') from None
 
 
 @dataclass(frozen=True)
@@ -258,13 +268,34 @@ class Client:
                 headers = {'Content-Type': 'application/json'}
                 if self.profile.get('api_key'):
                     headers['Authorization'] = 'Bearer '+self.profile['api_key']
+                payload = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8') if body is not None else None
+                if payload is not None and len(payload) > 64*1024**2:
+                    raise StrataError('Service request exceeds 64 MiB; resize images or reduce the request')
+                if cancelled.is_set():
+                    return
                 conn.connect()
                 result['socket'] = conn.sock
                 if cancelled.is_set():
                     return
                 conn.sock.settimeout(wait_s)
-                conn.request('POST' if body is not None else 'GET', path, json.dumps(body, allow_nan=False).encode() if body is not None else None, headers)
+                conn.request('POST' if body is not None else 'GET', path, payload, headers)
                 response = conn.getresponse()
+                if cancelled.is_set():
+                    return
+                # http.client accepts the first of duplicate lengths and ignores a length beside chunked.
+                wire_headers = response.getheaders()
+                lengths = [value.strip() for key,value in wire_headers if key.lower() == 'content-length']
+                transfers = [value.strip().lower() for key,value in wire_headers if key.lower() == 'transfer-encoding']
+                if len(lengths) > 1 or len(transfers) > 1 or (lengths and transfers):
+                    raise StrataError('Ambiguous service response framing')
+                if lengths:
+                    if not re.fullmatch(r'[0-9]+', lengths[0]):
+                        raise StrataError('Invalid service response Content-Length')
+                    length = lengths[0].lstrip('0') or '0'
+                    if len(length) > 8 or int(length) > 16*1024**2:
+                        raise StrataError('Service response exceeds 16 MiB')
+                if transfers and transfers != ['chunked']:
+                    raise StrataError('Unsupported service response Transfer-Encoding')
                 expected_length = getattr(response, 'length', None)
                 raw = response.read(16*1024**2+1)
                 if len(raw) > 16*1024**2:
@@ -327,8 +358,13 @@ class Client:
                     transport.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
-            conn.close()
-            worker.join(timeout=5)
+                try:
+                    transport.close()
+                except OSError:
+                    pass
+            # Windows buffered header/body reads may outlive shutdown. Only their worker closes
+            # HTTPResponse and HTTPConnection, so cancellation never waits for a buffered-reader lock.
+            worker.join(timeout=.2)
             raise
 
 
@@ -471,7 +507,7 @@ class Managed:
         try:
             children = proc.children(recursive=True)
         except psutil.NoSuchProcess:
-            children = []
+            raise StrataError('Owned parent exited before its children could be verified; resource release is unconfirmed') from None
         targets = [proc, *children]
         for target in targets:
             try:
@@ -734,7 +770,7 @@ def _control(connection, action, check=interrupted):
     profile = read_profile(connection.profile)
     client = Client(profile)
     if action == 'status':
-        return client.request('/v1/status', timeout=5, check=check)
+        return service_status(client.request('/v1/status', timeout=5, check=check))
     with service_lock(profile, check=check):
         manager = Managed(connection.profile, profile) if profile['mode'] == 'managed' else None
         if action == 'stop':
@@ -746,13 +782,13 @@ def _control(connection, action, check=interrupted):
             raise StrataError('Enable lifecycle control explicitly for this external profile')
         if manager and action in ('start', 'load'):
             manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile) if profile.get('same_gpu') else None)
-        if action == 'load' and profile.get('same_gpu'):
+        if action == 'load':
             status = service_status(client.request('/v1/status', timeout=5, check=check))
-            if status['concurrency']['serving'] != 1:
+            if profile.get('same_gpu') and status['concurrency']['serving'] != 1:
                 raise StrataError('Same-GPU mode requires parallel=1')
             if status.get('protocol_version') != 1 or status['activity']['in_flight']:
                 raise StrataError('Load requires an idle compatible Strata-T8 service')
-            if cleanup(client, profile, manager, None):
+            if profile.get('same_gpu') and cleanup(client, profile, manager, None):
                 status = service_status(manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile)))
                 if status['concurrency']['serving'] != 1 or status['activity']['in_flight']:
                     raise StrataError('Load requires an idle compatible Strata-T8 service with parallel=1')
@@ -764,7 +800,7 @@ def _control(connection, action, check=interrupted):
             elif action == 'unload':
                 if cleanup(client, profile, manager, None):
                     return {'service': 'strata', 'stopped': True, 'released': True}
-            status = client.request('/v1/status', timeout=5, check=check)
+            status = service_status(client.request('/v1/status', timeout=5, check=check))
         finally:
             if action == 'load' and (profile.get('same_gpu') or status is None) and profile.get('allow_lifecycle'):
                 stopped = cleanup(client, profile, manager, baseline)

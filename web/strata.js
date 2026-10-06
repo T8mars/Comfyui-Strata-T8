@@ -36,23 +36,30 @@ function renderPanel(container) {
     const status=document.createElement("pre"); status.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere";
     status.style.fontSize="12px";
     for(const input of [name,fields,key]) input.style.cssText+=";display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:6px;border:1px solid #666;border-radius:4px;background:var(--comfy-input-bg,#333);color:var(--input-text,#eee)";
-    let saved={}, initialized=false, reloadGeneration=0;
+    let saved={}, initialized=false, reloadGeneration=0, statusGeneration=0;
     const draft=()=>JSON.stringify([name.value,fields.value,key.value,Boolean(clearKey.checked)]);
-    const report=(error)=>{status.textContent=error.message || String(error);};
+    let cleanDraft=draft();
+    const show=(text,generation)=>{if(generation===statusGeneration)status.textContent=text;};
+    const report=(error,generation)=>show(error.message || String(error),generation);
+    function selectProfile(invalidate=true){
+        if(invalidate)++statusGeneration;
+        name.value=select.value;const value={...saved[select.value]};delete value.key_configured;
+        fields.value=JSON.stringify(value,null,2);key.value="";clearKey.checked=false;cleanDraft=draft();
+    }
     async function reload() {
-        const generation=++reloadGeneration, before=draft();
+        const generation=++reloadGeneration, notice=++statusGeneration, before=draft(), clean=before===cleanDraft;
         try { const data=await request("/strata_t8/profiles");if(generation!==reloadGeneration)return;
             if(!data.profiles || typeof data.profiles!=="object" || Array.isArray(data.profiles)) throw new Error("服务未返回有效的配置列表。");
             const unchanged=before===draft();saved=data.profiles; select.replaceChildren();
             for (const profile of Object.keys(saved)) {const option=document.createElement("option");option.value=profile;option.textContent=profile;select.append(option);}
             if(saved[name.value]) select.value=name.value;
-            if(unchanged && select.value && (!initialized || saved[name.value])) select.onchange();
+            if(clean && unchanged && select.value && (!initialized || saved[name.value])) selectProfile(false);
             initialized=true;
             const errors=Object.keys(data.profile_errors || {}).map(profile=>`配置 ${profile} 无法读取；输入完整配置和替换 API key 后保存。`);
-            status.textContent=[`本机配置目录：${data.home}\n保存后刷新页面，再选择 Strata 连接配置。`,...errors].join("\n");
-        } catch(error) {if(generation===reloadGeneration)report(error);}
+            show([`本机配置目录：${data.home}\n保存后刷新页面，再选择 Strata 连接配置。`,...errors].join("\n"),notice);
+        } catch(error) {if(generation===reloadGeneration)report(error,notice);}
     }
-    select.onchange=()=>{name.value=select.value;const value={...saved[select.value]};delete value.key_configured;fields.value=JSON.stringify(value,null,2);key.value="";clearKey.checked=false;};
+    select.onchange=()=>selectProfile();
     refresh.onclick=reload;
     container.append(select,refresh,name,fields,key,clearLabel);
     const save=document.createElement("button"); save.textContent="保存配置";
@@ -61,20 +68,20 @@ function renderPanel(container) {
         for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=saving;
         for(const button of actionButtons)button.disabled=saving || activeActions.has(button);
     }
-    save.onclick=async()=>{++reloadGeneration;saving=true;updateDisabled();try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;await reload();}catch(error){report(error);}finally{saving=false;updateDisabled();}};
+    save.onclick=async()=>{++reloadGeneration;const notice=++statusGeneration;saving=true;updateDisabled();show("保存中…",notice);try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;cleanDraft=draft();await reload();}catch(error){report(error,notice);}finally{saving=false;updateDisabled();}};
     container.append(save);
     const actions=document.createElement("div");
     actions.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0";
     for(const [action,label] of [["start","启动"],["status","状态"],["load","加载"],["unload","卸载"],["stop","停止托管服务"]]) {
         const button=document.createElement("button");button.textContent=label;
         actionButtons.push(button);
-        button.onclick=async()=>{activeActions.add(button);updateDisabled();status.textContent="处理中…";try{
+        button.onclick=async()=>{activeActions.add(button);updateDisabled();const notice=++statusGeneration;show("处理中…",notice);try{
             if(action!=="status") {
                 const queued=await request("/prompt",{client_id:api.clientId,prompt:{"1":{class_type:"StrataT8Connection",inputs:{profile:name.value}},"2":{class_type:"StrataT8Control",inputs:{connection:["1",0],action}}}});
                 if(typeof queued.prompt_id!=="string" || !queued.prompt_id) throw new Error("ComfyUI 未返回队列任务 ID；服务操作未确认入队。");
-                status.textContent=JSON.stringify(queued,null,2)+"\n服务操作已进入 ComfyUI 队列；同卡加载验证返回前会释放显存。";
-            } else status.textContent=JSON.stringify(await request("/strata_t8/control",{name:name.value,action}),null,2);
-        }catch(error){report(error);}finally{activeActions.delete(button);updateDisabled();}};
+                show(JSON.stringify(queued,null,2)+"\n服务操作已进入 ComfyUI 队列；同卡加载验证返回前会释放显存。",notice);
+            } else show(JSON.stringify(await request("/strata_t8/control",{name:name.value,action}),null,2),notice);
+        }catch(error){report(error,notice);}finally{activeActions.delete(button);updateDisabled();}};
         actions.append(button);
     }
     container.append(actions,status); reload();

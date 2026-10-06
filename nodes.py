@@ -43,6 +43,8 @@ def sampling():
 def request(prompt, system='', history='[]', **options):
     if not isinstance(prompt, str) or not isinstance(system, str) or not isinstance(history, str):
         raise core.StrataError('Prompt, system and history must be text strings')
+    for text in (prompt, system, history):
+        core.text_unicode(text)
     messages = core.json_loads(history)
     if not isinstance(messages, list) or len(messages) > 256 or any(not isinstance(m, dict) or m.get('role') not in ('system', 'user', 'assistant') or not isinstance(m.get('content'), str) for m in messages):
         raise core.StrataError('History must be a JSON array of at most 256 role/content text messages')
@@ -65,55 +67,108 @@ def request(prompt, system='', history='[]', **options):
 def check_schema(schema):
     from jsonschema import Draft202012Validator, SchemaError
     from jsonschema.validators import validator_for
-    from referencing import Registry, Resource
-    from referencing.exceptions import Unresolvable, NoSuchResource, CannotDetermineSpecification
-    from referencing.jsonschema import DRAFT202012, specification_with, UnknownDialect
+    from referencing import Registry
+    from referencing.exceptions import Unresolvable, NoSuchResource
+    from referencing.jsonschema import specification_with, UnknownDialect
     if not isinstance(schema, (dict, bool)):
         raise core.StrataError('Invalid JSON Schema')
-    validator_cls = validator_for(schema, default=Draft202012Validator)
-    try:
-        validator_cls.check_schema(schema)
-    except (SchemaError, RecursionError):
-        raise core.StrataError('Invalid JSON Schema') from None
     # No HTTP/file reference retrieval in schemas supplied by a workflow.
-    specification = specification_with(validator_cls.META_SCHEMA['$schema'], default=DRAFT202012)
     def no_remote(uri):
         raise NoSuchResource(ref=uri)
-    registry = Registry(retrieve=no_remote)
-    visited = set()
-    def local_refs(resource, scoped):
-        value = resource.contents
-        if id(value) in visited:
-            return
-        visited.add(id(value))
-        if isinstance(value, dict):
-            current_cls = validator_for(value, default=validator_cls)
-            for key in ('$ref', '$dynamicRef', '$recursiveRef'):
-                if key not in value or key not in current_cls.VALIDATORS:
-                    continue
-                reference = value[key]
-                if not reference.startswith('#'):
-                    raise core.StrataError('JSON Schema references must be local fragments')
-                try:
-                    resolved = scoped.lookup(reference)
-                except Unresolvable:
-                    raise core.StrataError('JSON Schema local reference does not identify an existing schema') from None
-                try:
-                    validator_for(resolved.contents, default=current_cls).check_schema(resolved.contents)
-                except SchemaError:
-                    raise core.StrataError('JSON Schema local reference must identify a valid schema') from None
-                # A pointer may make const/enum data into an executable schema; validate that target too.
-                local_refs(Resource.from_contents(resolved.contents, default_specification=specification), resolved.resolver)
-        # Follow schema-valued keywords only; $ref fields in const/enum are ordinary data.
-        for child in resource.subresources():
-            local_refs(child, scoped.in_subresource(child))
+
+    def schema_class(node, inherited):
+        if not isinstance(node, dict) or '$schema' not in node:
+            return inherited
+        if not isinstance(node['$schema'], str) or not node['$schema']:
+            raise core.StrataError('JSON Schema $schema must be a nonempty string')
+        selected = validator_for(node, default=None)
+        if selected is None:
+            raise core.StrataError('Unsupported JSON Schema dialect')
+        return selected
+
+    checked = {}
+    def check_tree(node, inherited):
+        current_cls = schema_class(node, inherited)
+        key = (id(node), current_cls)
+        if key in checked:
+            return checked[key]
+        specification = specification_with(current_cls.META_SCHEMA['$schema'])
+        try:
+            children = list(specification.subresources_of(node))
+        except (TypeError, AttributeError):
+            current_cls.check_schema(node)
+            raise core.StrataError('Invalid JSON Schema child container') from None
+        if isinstance(node, dict) and 'dependencies' in current_cls.VALIDATORS:
+            dependencies = node.get('dependencies')
+            if isinstance(dependencies, dict):
+                # Older referencing drafts choose dependencies from the first value.
+                # Property-name lists are data; inspect every schema dependency independently.
+                property_dependencies = {id(value) for value in dependencies.values() if isinstance(value, list)}
+                children = [child for child in children if id(child) not in property_dependencies]
+                children.extend(value for value in dependencies.values() if isinstance(value, (dict, bool)))
+        child_ids = {id(child) for child in children if isinstance(child, dict)}
+        def mask(value):
+            # Parent meta-schemas must not reinterpret an embedded resource's different draft.
+            # Preserve containers, booleans and invalid scalar shapes for the parent's checks.
+            if isinstance(value, dict):
+                if id(value) in child_ids:
+                    return {}
+                return {key:{} if isinstance(part,dict) and id(part) in child_ids else part
+                        for key,part in value.items()}
+            if isinstance(value, list):
+                return [{} if isinstance(part,dict) and id(part) in child_ids else part for part in value]
+            return value
+        shallow = {key:mask(value) for key,value in node.items()} if isinstance(node,dict) else node
+        current_cls.check_schema(shallow)
+        result = current_cls, specification, children
+        checked[key] = result
+        for child in children:
+            check_tree(child, current_cls)
+        return result
     try:
-        root = Resource.from_contents(schema, default_specification=specification)
-        resolver = registry.with_resource('', root).crawl().resolver_with_root(root)
-        local_refs(root, resolver)
+        validator_cls, specification, _ = check_tree(schema, Draft202012Validator)
+        registry = Registry(retrieve=no_remote)
+        root = specification.create_resource(schema)
+        resolver = registry.resolver_with_root(root)
+        visited = set()
+        def local_refs(resource, scoped, inherited):
+            value = resource.contents
+            current_cls, current_specification, children = check_tree(value, inherited)
+            identity = (id(value), current_cls, scoped._base_uri)
+            if identity in visited:
+                return
+            visited.add(identity)
+            if isinstance(value, dict):
+                active = dict(current_cls._APPLICABLE_VALIDATORS(value))
+                for key in ('$ref', '$dynamicRef', '$recursiveRef'):
+                    if key not in active or key not in current_cls.VALIDATORS:
+                        continue
+                    reference = active[key]
+                    if not reference.startswith('#'):
+                        raise core.StrataError('JSON Schema references must be local fragments')
+                    try:
+                        resolved = scoped.lookup(reference)
+                    except Unresolvable:
+                        raise core.StrataError('JSON Schema local reference does not identify an existing schema') from None
+                    except (AttributeError, TypeError):
+                        raise core.StrataError('JSON Schema local reference with mixed legacy dependencies is unsupported; use a JSON Pointer reference (#/...)') from None
+                    try:
+                        _, target_specification, _ = check_tree(resolved.contents, current_cls)
+                    except SchemaError:
+                        raise core.StrataError('JSON Schema local reference must identify a valid schema') from None
+                    local_refs(target_specification.create_resource(resolved.contents), resolved.resolver, current_cls)
+                if '$ref' in active and len(active) == 1:
+                    return  # Older drafts ignore sibling assertions, while the target remains checked.
+            for contents in children:
+                _, child_specification, _ = check_tree(contents, current_cls)
+                child = child_specification.create_resource(contents)
+                local_refs(child, scoped.in_subresource(child), current_cls)
+        local_refs(root, resolver, validator_cls)
+    except SchemaError:
+        raise core.StrataError('Invalid JSON Schema') from None
     except RecursionError:
         raise core.StrataError('JSON Schema is too deeply nested') from None
-    except (CannotDetermineSpecification, UnknownDialect):
+    except UnknownDialect:
         raise core.StrataError('Unsupported JSON Schema dialect') from None
     return validator_cls(schema, registry=registry)
 

@@ -1,11 +1,11 @@
 {
   "name": "Strata-T8 ComfyUI nodes",
   "repository": "T8mars/Comfyui-Strata-T8",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "registry_node_id": "strata-t8",
   "publisher_id": "t8star",
   "runtime_repository": "T8mars/Strata-T8",
-  "runtime_min_version": "0.1.39-t8.6",
+  "runtime_min_version": "0.1.39-t8.12",
   "protocol_version": 1,
   "models_included": false
 }

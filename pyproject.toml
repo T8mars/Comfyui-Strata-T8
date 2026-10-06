@@ -1,6 +1,6 @@
 [project]
 name = "strata-t8"
-version = "1.0.3"
+version = "1.0.4"
 description = "Strata text, structured prompts and vision nodes with managed local inference and GPU handoff."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
