@@ -53,10 +53,21 @@ Schema 预检的 scope/草案算法与主仓 Agent 对齐，但没有宣称支�
 
 ## 主 Agent 后续验收与发布
 
-此段留给主 Agent 追加实际 GPU、Windows/Linux CI、GitHub Release 及 Registry 核对证据；不与子 Agent 的推理替身/CPU 探针混为同一次验收。
+主 Agent 的正式 GPU 和发行证据见下文，与子 Agent 的推理替身/CPU 探针分别记录。
 
 ## 最终本机回归
 
 受控 anchor 拒绝补强后，新增模块 **29 例通过，6.631s**；全套 **160 例通过，21.968s，无跳过**。升版至 1.0.4 并更新运行包元数据后，再次执行全套 **160 例通过，22.383s，无跳过**。日志分别为 `audit5-node-new-final.log`、`audit5-node-final.log`、`audit5-node-v104-final.log`。
 
 不可变基线选取最终 **22 个缺陷方法全部失败**，含 subtests 为 29 failures、14 errors，12.788s；脚本核对 `every_selected_method_failed=true`。最初探针的 DOM harness 曾错误解析 GET options，修正后的上述不可变运行作为最终复现证据；没有将初版 harness 错误计为产品缺陷或通过。
+
+
+## 正式 GPU 和发行核对
+
+实际 ComfyUI 0.38.0 / Torch 2.7.0+cu128 / RTX 4060 Ti 16GB / 128GB RAM / DreamShaper 8，最终源码完成文字→绘图、图片理解→绘图、两镜头分镜→批量绘图，分别 26.27s、30.30s、56.48s，共 4 张图。队列 load、缓存重复与每次文字/视觉进程卸载检查通过，最终停止自有托管服务；验证档案空闲显存门槛 8GiB，产品默认 12GiB。8 份相关功能源码 SHA256 与最终源码匹配，未以最初验收替代补丁后的重跑。
+
+[节点 1.0.4](https://github.com/T8mars/Comfyui-Strata-T8/releases/tag/v1.0.4) 为 `867e833db18eee3c8a85350d645124daef7a514f`，配套[运行包 0.1.39-t8.12](https://github.com/T8mars/Strata-T8/releases/tag/v0.1.39-t8.12) 为 `873856b0468865bdf704788b004d6889794e0c92`。[Windows/Linux CI](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37464024808) 成功，Windows 160 例全执行，Linux 明确跳过 1 个 Windows 专属用例。[官方 Registry 发布](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37464025271) 成功。
+
+GitHub ZIP SHA256 `5aff7229cddb906fa68f2a31042b704d815cc8ee1399050f175badb3da0957f9`，Registry ZIP SHA256 `cc7e81316a4d679f48093ca60e4629ae94caed9e832b0e6f6b57338ca766a6c5`；全部代码逐字节匹配发布提交，10 个节点可导入。Publisher `t8star`，CDN 包可取得，[Registry 接口](https://api.comfy.org/nodes/strata-t8/versions/1.0.4) 核查为 `NodeVersionStatusPending`，未确认 Manager 可检索；审核期间使用 GitHub Release。
+
+详细证据见[主仓第五组报告](https://github.com/T8mars/Strata-T8/blob/main/docs/AUDIT-20-ROUND5-T8.md)。这是发布后的文档补充，没有覆盖已发布资产。
