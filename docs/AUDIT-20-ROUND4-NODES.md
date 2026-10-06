@@ -44,4 +44,15 @@
 
 ## 适用范围
 
-完整回归实际读取主仓 Python Service；其推理和资源行为仍由 ResidentEngine/MockEngine 替身提供。托管 PID、ensure/stop、同卡 handoff 是替身；没有 Linux 托管进程、AMD、多 GPU 或显存测量。没有下载模型、改版本/README/CI 或执行提交/发布。主 Agent 负责最终 GPU 工作流和两个独立仓库的发行。20 轮检查不证明项目不存在其它缺陷。
+完整回归实际读取主仓 Python Service；其推理和资源行为仍由 ResidentEngine/MockEngine 替身提供。托管 PID、ensure/stop、同卡 handoff 是替身；没有 Linux 托管进程、AMD、多 GPU 或显存测量。子 Agent 审计阶段没有下载模型、改版本/README/CI 或执行提交/发布。主 Agent 的后续 GPU 工作流和发行证据见下文。20 轮检查不证明项目不存在其它缺陷。
+
+
+## 主 Agent 后续验收与发布
+
+本机完整 131 例通过，15.484s；[Windows/Linux CI](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37452842843) 通过，Windows 131 例全部执行，Linux 明确跳过 1 个 Windows 专属用例。节点 [1.0.3](https://github.com/T8mars/Comfyui-Strata-T8/releases/tag/v1.0.3) 源码提交为 `4203df3caef5495d998a8a9d6f9721c12a885cdc`，配套运行包 [0.1.39-t8.11](https://github.com/T8mars/Strata-T8/releases/tag/v0.1.39-t8.11)。
+
+在实际 ComfyUI 0.38.0、Torch 2.7.0+cu128、RTX 4060 Ti 16GB/128GB RAM 和 DreamShaper 8 下执行文本→绘图、图片反推→绘图、两镜头分镜→批量绘图，分别 28.28s/28.45s/54.38s，共 4 张图片。排队 load、缓存重复和每次文字/视觉进程释放检查通过。验证档案空闲显存门槛 8GiB，产品默认 12GiB；功能源码 SHA256 与正式版本匹配。此为主 Agent 后续 GPU 验收，与上文子 Agent 的替身回归区分。
+
+GitHub ZIP SHA256 `ea7a8b4b7550bc70f104c8d54f00fa0088963cc36211eb52c327616bf0e1a155`；Registry ZIP SHA256 `64703daad0c015232710bb96c23a692cf0032f066e015145fed8827f3d296f93`。两份包内源码逐字节匹配发布提交，10 个节点可导入。Publisher `t8star` 的[官方发布工作流](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37452843332) 成功，CDN 包可取得；[Registry 版本接口](https://api.comfy.org/nodes/strata-t8/versions/1.0.3) 核查时仍为 `NodeVersionStatusPending`，未确认 Manager 可检索。等待审核期间可使用 GitHub Release 安装。
+
+完整证据和运行包核查见[主仓第四组报告](https://github.com/T8mars/Strata-T8/blob/main/docs/AUDIT-20-ROUND4-T8.md)。本段为发布后文档补充，没有覆盖不可变版本或发布资产。
