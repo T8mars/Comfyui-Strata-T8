@@ -1,0 +1,18 @@
+[project]
+name = "strata-t8"
+version = "1.0.0"
+description = "Strata text, structured prompts and vision nodes with managed local inference and GPU handoff."
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["jsonschema>=4.23,<5"]
+classifiers = ["Operating System :: OS Independent", "Programming Language :: Python :: 3"]
+
+[project.urls]
+Repository = "https://github.com/T8mars/Comfyui-Strata-T8"
+Documentation = "https://github.com/T8mars/Comfyui-Strata-T8#readme"
+"Bug Tracker" = "https://github.com/T8mars/Comfyui-Strata-T8/issues"
+
+[tool.comfy]
+PublisherId = "t8star"
+DisplayName = "Strata-T8"
+requires-comfyui = ">=0.38.0"

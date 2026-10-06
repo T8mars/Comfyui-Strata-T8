@@ -1,0 +1,15 @@
+.github/
+tests/
+tools/
+docs/
+AGENTS.md
+meta.json
+features.json
+.gitignore
+*.gguf
+*.safetensors
+*.pt
+*.ckpt
+.env
+profiles/
+.local/

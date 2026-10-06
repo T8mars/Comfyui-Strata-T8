@@ -1,0 +1,13 @@
+{
+  "text": true,
+  "structured_output": true,
+  "vision": true,
+  "batch": true,
+  "managed_service": true,
+  "same_gpu_handoff": true,
+  "comfyui_v3": true,
+  "comfyui_v1_adapter": true,
+  "registry_update": true,
+  "runtime_bundled": false,
+  "models_bundled": false
+}

@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.local/
+.venv/
+dist/
+*.log
+*.gguf
+*.safetensors
+*.pt
+*.ckpt
+.env
+profiles/
+_strata/
+/node.zip

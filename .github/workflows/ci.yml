@@ -1,0 +1,30 @@
+name: Node checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      STRATA_SOURCE_DIR: ${{ github.workspace }}/_strata
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: T8mars/Strata-T8
+          ref: 8111a9ae3ac200f7f75268a218a1e6fe84cd30c2
+          path: _strata
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt numpy jinja2 regex psutil pillow pyyaml
+      - run: python -m unittest discover -s tests -q
+      - run: python tools/build_release.py
