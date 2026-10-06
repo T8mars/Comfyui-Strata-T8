@@ -116,7 +116,7 @@ def validated(text, schema):
     try:
         value = core.json_loads(text)
         Draft202012Validator(schema).validate(value)
-    except (core.StrataError, ValueError, ValidationError):
+    except (core.StrataError, ValueError, ValidationError, RecursionError):
         raise StructuredOutputError('Model output is not valid JSON matching the schema') from None
     return value
 
@@ -201,7 +201,9 @@ class StrataStructured(Base):
     def run(self, connection, prompt, schema='', system='', repair_attempts=0, **options):
         if type(repair_attempts) is not int or not 0 <= repair_attempts <= 2:
             raise core.StrataError('Repair attempts must be an integer between 0 and 2')
-        schema = core.json_loads(schema) if schema else STORY_SCHEMA
+        if not isinstance(schema, str):
+            raise core.StrataError('JSON Schema must be text')
+        schema = core.json_loads(schema) if schema.strip() else STORY_SCHEMA
         # Validate schema before contacting/loading a model.
         check_schema(schema)
         req = request(prompt, system, **options)
@@ -262,7 +264,7 @@ class StrataExtract(Base):
     def run(self, json_text, pointer='', item_field='', expected_type='any'):
         value = globals()['pointer'](core.json_loads(json_text), pointer)
         types = {'string': str, 'number': (int, float), 'array': list, 'object': dict, 'boolean': bool}
-        if expected_type != 'any' and expected_type not in types:
+        if not isinstance(expected_type, str) or (expected_type != 'any' and expected_type not in types):
             raise core.StrataError('Unknown expected JSON type')
         if expected_type != 'any' and (not isinstance(value, types[expected_type]) or (expected_type == 'number' and isinstance(value, bool))):
             raise core.StrataError(f'Extracted value is not {expected_type}')

@@ -31,25 +31,32 @@ function renderPanel(container) {
     fields.setAttribute("aria-label","连接配置 JSON");
     const key=document.createElement("input"); key.type="password"; key.placeholder="API key：留空保留；新托管配置会自动生成"; key.autocomplete="off";
     key.setAttribute("aria-label","API key");
+    const clearLabel=document.createElement("label");const clearKey=document.createElement("input");clearKey.type="checkbox";
+    clearKey.setAttribute("aria-label","清除已保存 API key");clearLabel.append(clearKey," 清除已保存 API key（托管模式重新生成）");
     const status=document.createElement("pre"); status.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere";
     status.style.fontSize="12px";
     for(const input of [name,fields,key]) input.style.cssText+=";display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:6px;border:1px solid #666;border-radius:4px;background:var(--comfy-input-bg,#333);color:var(--input-text,#eee)";
-    let saved={};
+    let saved={}, initialized=false, reloadGeneration=0;
+    const draft=()=>JSON.stringify([name.value,fields.value,key.value,Boolean(clearKey.checked)]);
     const report=(error)=>{status.textContent=error.message || String(error);};
     async function reload() {
-        try { const data=await request("/strata_t8/profiles"); saved=data.profiles; select.replaceChildren();
+        const generation=++reloadGeneration, before=draft();
+        try { const data=await request("/strata_t8/profiles");if(generation!==reloadGeneration)return;
+            if(!data.profiles || typeof data.profiles!=="object" || Array.isArray(data.profiles)) throw new Error("服务未返回有效的配置列表。");
+            const unchanged=before===draft();saved=data.profiles; select.replaceChildren();
             for (const profile of Object.keys(saved)) {const option=document.createElement("option");option.value=profile;option.textContent=profile;select.append(option);}
             if(saved[name.value]) select.value=name.value;
-            if(select.value) select.onchange();
+            if(unchanged && select.value && (!initialized || saved[name.value])) select.onchange();
+            initialized=true;
             const errors=Object.keys(data.profile_errors || {}).map(profile=>`配置 ${profile} 无法读取；输入完整配置和替换 API key 后保存。`);
             status.textContent=[`本机配置目录：${data.home}\n保存后刷新页面，再选择 Strata 连接配置。`,...errors].join("\n");
-        } catch(error) {report(error);}
+        } catch(error) {if(generation===reloadGeneration)report(error);}
     }
-    select.onchange=()=>{name.value=select.value;const value={...saved[select.value]};delete value.key_configured;fields.value=JSON.stringify(value,null,2);key.value="";};
+    select.onchange=()=>{name.value=select.value;const value={...saved[select.value]};delete value.key_configured;fields.value=JSON.stringify(value,null,2);key.value="";clearKey.checked=false;};
     refresh.onclick=reload;
-    container.append(select,refresh,name,fields,key);
+    container.append(select,refresh,name,fields,key,clearLabel);
     const save=document.createElement("button"); save.textContent="保存配置";
-    save.onclick=async()=>{try {const profile=JSON.parse(fields.value);profile.api_key=key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";await reload();}catch(error){report(error);}};
+    save.onclick=async()=>{++reloadGeneration;for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=true;try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;await reload();}catch(error){report(error);}finally{for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=false;}};
     container.append(save);
     const actions=document.createElement("div");
     actions.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0";

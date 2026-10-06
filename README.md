@@ -66,7 +66,7 @@ IQ3_S 主模型约 **83.62GB**，MTP 所需张量约 **5.22GB**，另需预处�
 
 托管模式使用 Windows 整合包；Linux ComfyUI 使用 `external` 连接已部署的 Strata 服务。托管档案自动生成本机 API key。连接已启动服务可使用 `mode:external`、`url:http://127.0.0.1:8080`；默认 `allow_lifecycle:false`、`same_gpu:false`。本机同卡外部服务需要显式启用这两项，并使用 Strata-T8 协议 1、单请求配置。远程连接保持 `same_gpu:false`。
 
-档案保存在 `%LOCALAPPDATA%/Strata-T8-ComfyUI`；Linux 默认 `~/.config/Strata-T8-ComfyUI`，可用 `STRATA_COMFY_HOME` 指定。工作流只保存档案名称，API key 使用面板密码框填写。模型安装和运行包配置独立于节点目录。
+档案保存在 `%LOCALAPPDATA%/Strata-T8-ComfyUI`；Linux 默认 `~/.config/Strata-T8-ComfyUI`，可用 `STRATA_COMFY_HOME` 指定。工作流只保存档案名称，API key 使用面板密码框填写；留空保留，勾选“清除已保存 API key”时 external 清空、managed 重新生成。模型安装和运行包配置独立于节点目录。
 
 | 功能 | 节点 |
 | --- | --- |
@@ -83,7 +83,7 @@ Python 3.10+；已完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 12
 
 节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
 
-[第二次 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND2-NODES.md)；节点支持当前 ComfyUI V3 API，并保留 V1 适配。
+[第三组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND3-NODES.md)；节点支持当前 ComfyUI V3 API，并保留 V1 适配。
 
 ## 来源与致谢
 

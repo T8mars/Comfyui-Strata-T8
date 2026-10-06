@@ -134,6 +134,11 @@ def normalize_profile(profile):
             raise StrataError(f'Invalid numeric profile value: {key}')
     if profile.get('vision', 'gpu') not in ('gpu', 'cpu', 'no'):
         raise StrataError('Vision mode must be gpu, cpu or no')
+    # Extension fields are retained, but they must also remain valid on the next read.
+    try:
+        json.dumps(profile, allow_nan=False)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise StrataError('Profile values must be JSON data with finite numbers') from None
     host = '['+url.hostname+']' if ':' in url.hostname else url.hostname
     profile['url'] = urllib.parse.urlunsplit((url.scheme, f'{host}:{port}', url.path.rstrip('/'), '', ''))
     return profile
@@ -165,7 +170,7 @@ def _save_profile(name, profile):
     temp = path.with_suffix('.'+uuid.uuid4().hex+'.tmp')
     try:
         with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w', encoding='utf-8') as stream:
-            json.dump(profile, stream, ensure_ascii=False, indent=2)
+            json.dump(profile, stream, ensure_ascii=False, indent=2, allow_nan=False)
         os.replace(temp, path)
         os.chmod(path, 0o600)
     finally:
@@ -208,7 +213,14 @@ def encode_images(images, max_images=8, max_pixels=1048576):
             image = image.convert('RGB')
         scale = min(1, (max_pixels/(image.width*image.height))**.5)
         if scale < 1:
-            image = image.resize((max(1, int(image.width*scale)), max(1, int(image.height*scale))), Image.Resampling.LANCZOS)
+            width, height = max(1, int(image.width*scale)), max(1, int(image.height*scale))
+            # Clamping a thin dimension to one can otherwise exceed the requested pixel cap.
+            if width*height > max_pixels:
+                if width >= height:
+                    width = max_pixels//height
+                else:
+                    height = max_pixels//width
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
         out = io.BytesIO()
         image.save(out, format='PNG')
         result.append('data:image/png;base64,' + base64.b64encode(out.getvalue()).decode())
@@ -223,8 +235,9 @@ class Client:
         endpoint = urllib.parse.urlsplit(self.profile['url'])
         cls = http.client.HTTPSConnection if endpoint.scheme == 'https' else http.client.HTTPConnection
         wait_s = timeout if timeout is not None else self.profile.get('timeout_s', 1800)
-        if isinstance(wait_s, bool) or not isinstance(wait_s, (int, float)) or not math.isfinite(wait_s) or wait_s <= 0:
-            raise StrataError('Request timeout must be finite and above zero')
+        if (isinstance(wait_s, bool) or not isinstance(wait_s, (int, float))
+                or not 0 < wait_s <= 86400 or not math.isfinite(wait_s)):
+            raise StrataError('Request timeout must be finite, above zero and at most 86400 seconds')
         if check:
             check()
         conn = cls(endpoint.hostname, endpoint.port, timeout=min(5, wait_s))
@@ -243,9 +256,12 @@ class Client:
                 conn.sock.settimeout(wait_s)
                 conn.request('POST' if body is not None else 'GET', path, json.dumps(body, allow_nan=False).encode() if body is not None else None, headers)
                 response = conn.getresponse()
+                expected_length = getattr(response, 'length', None)
                 raw = response.read(16*1024**2+1)
                 if len(raw) > 16*1024**2:
                     raise StrataError('Service response exceeds 16 MiB')
+                if type(expected_length) is int and len(raw) != expected_length:
+                    raise StrataError('Incomplete service response: Content-Length was not received')
                 try:
                     data = json_loads(raw)
                 except StrataError:
@@ -423,8 +439,10 @@ class Managed:
                 else:
                     break
             has_server = index < len(command) and Path(command[index]).resolve() == server
-            has_config = any(arg == '--config' and index+1 < len(command) and Path(command[index+1]).resolve() == config.resolve()
-                             for index, arg in enumerate(command))
+            config_options = [index for index, arg in enumerate(command) if arg == '--config' or arg.startswith('--config=')]
+            has_config = (len(config_options) == 1 and command[config_options[0]] == '--config'
+                          and config_options[0]+1 < len(command)
+                          and Path(command[config_options[0]+1]).resolve() == config.resolve())
             created = proc.create_time()
             if (not math.isfinite(created) or abs(created-state['created']) > .01 or Path(proc.exe()).resolve() != recorded_python
                     or not has_server or not has_config):
@@ -552,8 +570,10 @@ class Managed:
                 raise
             finally:
                 temp.unlink(missing_ok=True)
-        state = json.loads(self.state_path.read_text(encoding='utf-8'))
         try:
+            state = json_loads(self.state_path.read_text(encoding='utf-8'))
+            if not isinstance(state, dict) or not isinstance(state.get('instance'), str) or not state['instance']:
+                raise StrataError('Invalid owned-service instance record; readiness cannot be confirmed')
             deadline = time.monotonic()+90
             while time.monotonic() < deadline:
                 check()
@@ -566,6 +586,7 @@ class Managed:
                     continue
                 if status.get('instance_id') != state['instance']:
                     raise StrataError('Port belongs to a different server instance')
+                service_status(status)
                 return status
             raise StrataError('Managed HTTP server did not become ready within 90 seconds')
         except BaseException:
@@ -592,7 +613,7 @@ def gpu_handoff(profile):
 
 def cleanup(client, profile, manager, baseline):
     deadline = time.monotonic()+float(profile.get('cleanup_timeout_s', 90))
-    last = None
+    last, stopped = None, False
     def remaining(limit):
         budget = deadline-time.monotonic()
         if budget <= 0:
@@ -613,6 +634,7 @@ def cleanup(client, profile, manager, baseline):
         if manager:
             if not manager.stop():
                 raise StrataError('Resource release could not be confirmed and no owned service can be stopped')
+            stopped = True
         else:
             raise StrataError(f'External service release could not be confirmed: {last}')
     if baseline:
@@ -622,6 +644,7 @@ def cleanup(client, profile, manager, baseline):
             if time.monotonic() > end:
                 raise StrataError('GPU memory has not returned after Strata unload; downstream work is blocked')
             time.sleep(.2)
+    return stopped
 
 
 def generate(connection, requests):
@@ -650,7 +673,7 @@ def _generate(connection, requests):
             if profile.get('same_gpu') and status['activity']['in_flight']:
                 raise StrataError('Strata is busy with another request; retry after it finishes')
             cleanup_required = bool(profile.get('allow_lifecycle'))
-            if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['starting'] for p in status['processes'].values())):
+            if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
                 cleanup(client, profile, manager, None)
             baseline = gpu_handoff(profile) if profile.get('same_gpu') else None
             answers = []
@@ -718,7 +741,8 @@ def _control(connection, action, check=interrupted):
             if action == 'load':
                 client.request('/v1/load', {}, check=check)
             elif action == 'unload':
-                cleanup(client, profile, manager, None)
+                if cleanup(client, profile, manager, None):
+                    return {'service': 'strata', 'stopped': True, 'released': True}
             status = client.request('/v1/status', timeout=5, check=check)
         finally:
             if action == 'load' and (profile.get('same_gpu') or status is None) and profile.get('allow_lifecycle'):

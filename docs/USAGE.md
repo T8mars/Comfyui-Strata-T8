@@ -4,7 +4,7 @@
 
 通过 ComfyUI-Manager 安装 Strata-T8（Publisher `t8star`、节点 ID `strata-t8`），或下载 [节点 Release](https://github.com/T8mars/Comfyui-Strata-T8/releases/latest) 解压到 `ComfyUI/custom_nodes/Comfyui-Strata-T8`。使用 ComfyUI 自身 Python 安装该目录的 `requirements.txt`（仅 jsonschema），重启。Strata 使用独立 VisionReady 运行包的 Python、CUDA/HIP 和引擎；导入节点不会启动引擎、下载权重或执行 pip。ComfyUI 与绘图模型由已有环境提供。
 
-打开侧栏 **Strata-T8**，填写配置名称并保存连接 JSON，刷新页面后选择配置。API key 在独立密码框填写，留空保留；新托管配置自动生成。配置默认在 `%LOCALAPPDATA%/Strata-T8-ComfyUI`，可用 `STRATA_COMFY_HOME` 指定；此目录不应分发，工作流仅存配置名称。
+打开侧栏 **Strata-T8**，填写配置名称并保存连接 JSON，刷新页面后选择配置。API key 在独立密码框填写，留空保留；勾选“清除已保存 API key”时 external 清空，managed 重新生成。新托管配置自动生成。配置默认在 `%LOCALAPPDATA%/Strata-T8-ComfyUI`，可用 `STRATA_COMFY_HOME` 指定；此目录不应分发，工作流仅存配置名称。
 
 ```json
 {
