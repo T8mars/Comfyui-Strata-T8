@@ -617,6 +617,8 @@ class OwnedProcesses(unittest.TestCase):
         manager.python.touch()
         (manager.root/'tools').mkdir()
         (manager.root/'tools/managed_config.py').touch()
+        minimum = json.loads((NODE_ROOT/'meta.json').read_text(encoding='utf-8'))['runtime_min_version']
+        (manager.root/'meta.json').write_text(json.dumps({'version': minimum, 'protocol_version': 1}), encoding='utf-8')
         return manager
 
     def test_configuration_spawn_failure_closes_log(self):

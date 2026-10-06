@@ -48,9 +48,20 @@ def register():
         local(request, True)
         try:
             body = await request.json(loads=core.json_loads)
-            if not isinstance(body, dict) or not isinstance(body.get('name'), str) or not isinstance(body.get('profile'), dict):
+            if not isinstance(body, dict) or not isinstance(body.get('name'), str):
                 raise core.StrataError('Provide a profile name and JSON profile object')
-            await asyncio.to_thread(core.save_profile, body['name'], body['profile'])
+            if 'profile_json' in body:
+                if not isinstance(body['profile_json'], str):
+                    raise core.StrataError('Raw profile JSON must be text')
+                profile = core.json_loads(body['profile_json'])
+                if not isinstance(profile, dict):
+                    raise core.StrataError('Profile must be a JSON object')
+                profile['api_key'] = body.get('api_key', '__KEEP__')
+            else:
+                profile = body.get('profile')
+                if not isinstance(profile, dict):
+                    raise core.StrataError('Provide a profile name and JSON profile object')
+            await asyncio.to_thread(core.save_profile, body['name'], profile)
             return web.json_response({'saved': body['name']})
         except core.StrataError as error:
             return web.json_response({'error': str(error)}, status=400)

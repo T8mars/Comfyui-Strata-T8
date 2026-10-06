@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: T8mars/Strata-T8
-          ref: 0e95552b3c1cad46fdb62e1611fac31631a2dd66 # Fifth audit runtime fixes
+          ref: 7d9197609f64adefaea993124d795a62d5ace6a7 # Sixth audit runtime fixes (t8.13)
           path: _strata
       - uses: actions/setup-python@v5
         with:

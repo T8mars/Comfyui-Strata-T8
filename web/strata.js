@@ -68,7 +68,12 @@ function renderPanel(container) {
         for(const input of [save,refresh,select,name,fields,key,clearKey])input.disabled=saving;
         for(const button of actionButtons)button.disabled=saving || activeActions.has(button);
     }
-    save.onclick=async()=>{++reloadGeneration;const notice=++statusGeneration;saving=true;updateDisabled();show("保存中…",notice);try {const profile=JSON.parse(fields.value);profile.api_key=clearKey.checked ? "" : key.value || "__KEEP__";await request("/strata_t8/profile",{name:name.value,profile});key.value="";clearKey.checked=false;cleanDraft=draft();await reload();}catch(error){report(error,notice);}finally{saving=false;updateDisabled();}};
+    save.onclick=async()=>{++reloadGeneration;const notice=++statusGeneration;saving=true;updateDisabled();show("保存中…",notice);try {
+        const profile=JSON.parse(fields.value);
+        if(!profile || typeof profile!=="object" || Array.isArray(profile)) throw new Error("配置必须为 JSON 对象。");
+        await request("/strata_t8/profile",{name:name.value,profile_json:fields.value,api_key:clearKey.checked ? "" : key.value || "__KEEP__"});
+        key.value="";clearKey.checked=false;cleanDraft=draft();await reload();
+    }catch(error){report(error,notice);}finally{saving=false;updateDisabled();}};
     container.append(save);
     const actions=document.createElement("div");
     actions.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0";

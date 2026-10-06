@@ -67,8 +67,10 @@ class ProfileTransactions(unittest.TestCase):
         profile={'mode':'external','url':'http://localhost:8080','api_key':'test-key'}
         core.save_profile('test', profile)
         before=core.profile_path('test').read_bytes()
-        with self.assertRaises(UnicodeEncodeError):
-            core.save_profile('test', dict(profile, extra='\ud800'))
+        # The malformed input now fails preflight. Preserve this test's write-failure transaction.
+        with mock.patch.object(core.json, 'dump', side_effect=UnicodeEncodeError('utf-8', '\ud800', 0, 1, 'write failed')):
+            with self.assertRaises(UnicodeEncodeError):
+                core.save_profile('test', dict(profile, extra='valid text'))
         self.assertEqual(core.profile_path('test').read_bytes(), before)
         self.assertEqual(list(core.profile_path('test').parent.glob('*.tmp')), [])
 
@@ -276,7 +278,7 @@ const reply=profiles=>({ok:true,json:async()=>({profiles,home:'test'})});
  clear.checked=true;key.value='';const saving=save.onclick();await new Promise(r=>setImmediate(r));
  if([save,refresh,name,fields,key,clear].some(e=>!e.disabled))throw Error('save was not protected while in progress');
  pending.shift()(reply({draft:{mode:'external',url:'http://localhost:8080'}}));await saving;
- if(saves.length!==1||saves[0].profile.api_key!=='')throw Error('clear key serialized KEEP instead of empty');
+ if(saves.length!==1||saves[0].api_key!==''||JSON.parse(saves[0].profile_json).mode!=='external')throw Error('clear key serialized KEEP instead of empty');
  if([save,refresh,name,fields,key,clear].some(e=>e.disabled)||clear.checked)throw Error('save busy/clear state remained');
  fail=true;key.value='replacement';await save.onclick();
  if([save,refresh,name,fields,key,clear].some(e=>e.disabled)||key.value!=='replacement')throw Error('failed save lost editable recovery inputs');

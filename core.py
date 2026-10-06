@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
+import errno
 import hashlib
 import http.client
 import io
@@ -153,11 +154,22 @@ def normalize_profile(profile):
             raise StrataError(f'Invalid numeric profile value: {key}')
     if profile.get('vision', 'gpu') not in ('gpu', 'cpu', 'no'):
         raise StrataError('Vision mode must be gpu, cpu or no')
-    # Extension fields are retained, but they must also remain valid on the next read.
+    # Extension fields must survive a strict JSON round trip without changing member names.
     try:
-        json.dumps(profile, allow_nan=False)
+        pending, seen = [profile], set()
+        while pending:
+            item = pending.pop()
+            if isinstance(item, (dict, list, tuple)) and id(item) not in seen:
+                seen.add(id(item))
+                if isinstance(item, dict):
+                    if any(not isinstance(key, str) for key in item):
+                        raise ValueError('JSON member names must be text')
+                    pending.extend(item.values())
+                else:
+                    pending.extend(item)
+        json.dumps(profile, ensure_ascii=False, allow_nan=False).encode('utf-8')
     except (TypeError, ValueError, OverflowError, RecursionError):
-        raise StrataError('Profile values must be JSON data with finite numbers') from None
+        raise StrataError('Profile values must be JSON data with text member names, valid Unicode and finite numbers') from None
     host = '['+url.hostname+']' if ':' in url.hostname else url.hostname
     profile['url'] = urllib.parse.urlunsplit((url.scheme, f'{host}:{port}', url.path.rstrip('/'), '', ''))
     return profile
@@ -282,6 +294,8 @@ class Client:
                 response = conn.getresponse()
                 if cancelled.is_set():
                     return
+                if not 200 <= response.status < 300 and response.status < 400:
+                    raise StrataError(f'HTTP {response.status}: service did not return a successful API response; redirects are not followed')
                 # http.client accepts the first of duplicate lengths and ignores a length beside chunked.
                 wire_headers = response.getheaders()
                 lengths = [value.strip() for key,value in wire_headers if key.lower() == 'content-length']
@@ -410,7 +424,9 @@ def file_lock(key, check=interrupted):
                     import fcntl
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise StrataError('Cannot acquire Strata transaction lock') from None
                 if check:
                     check()
                 time.sleep(.1)
@@ -456,6 +472,26 @@ class Managed:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.state_path = self.dir/'owner.json'
         self.python = self.root/'runtime/python/python.exe'
+
+    def runtime_version(self):
+        """Managed preparation uses the portable contract; external connections need no metadata."""
+        try:
+            metadata = json_loads((self.root/'meta.json').read_text(encoding='utf-8'))
+            minimum = json_loads(Path(__file__).with_name('meta.json').read_text(encoding='utf-8'))['runtime_min_version']
+            version = metadata['version']
+            if type(metadata['protocol_version']) is not int or metadata['protocol_version'] != 1:
+                raise ValueError()
+            parsed = []
+            for value in (version, minimum):
+                match = re.fullmatch(r'([0-9]{1,8})\.([0-9]{1,8})\.([0-9]{1,8})-t8\.([0-9]{1,8})', value) if isinstance(value, str) else None
+                if not match:
+                    raise ValueError()
+                parsed.append(tuple(int(part) for part in match.groups()))
+        except (OSError, KeyError, TypeError, ValueError, StrataError):
+            raise StrataError('Managed runtime metadata is missing or invalid; select a compatible Strata-T8 portable runtime') from None
+        if parsed[0] < parsed[1]:
+            raise StrataError(f'Managed runtime version requires Strata-T8 {minimum} or newer; update the portable runtime first')
+        return version
 
     def owned(self):
         import psutil
@@ -534,7 +570,7 @@ class Managed:
         import psutil
         config_keys = ('runtime', 'data_dir', 'port', 'context', 'vision', 'api_key')
         startup = {key: self.profile.get(key) for key in config_keys}
-        startup['runtime_version'] = json.loads((self.root/'meta.json').read_text(encoding='utf-8')).get('version') if (self.root/'meta.json').is_file() else None
+        startup['runtime_version'] = self.runtime_version()
         fingerprint = hashlib.sha256(json.dumps(startup, sort_keys=True).encode()).hexdigest()
         proc = self.owned()
         if proc is not None and json.loads(self.state_path.read_text(encoding='utf-8')).get('fingerprint') != fingerprint:
@@ -582,8 +618,8 @@ class Managed:
                                 pass
                             except psutil.Error as error:
                                 failure = error
-                    except psutil.NoSuchProcess:
-                        pass
+                    except psutil.NoSuchProcess as error:
+                        failure = error  # Unknown children must not be treated as a confirmed empty tree.
                     except psutil.Error as error:
                         failure = error
                     finally:
@@ -700,6 +736,10 @@ def generate(connection, requests):
 
 def _generate(connection, requests):
     profile = read_profile(connection.profile)
+    needs_vision = any(isinstance(message.get('content'), list)
+                      for request in requests for message in request['messages'])
+    if needs_vision and profile['mode'] == 'managed' and profile.get('vision', 'gpu') == 'no':
+        raise StrataError('Enable the bundled vision encoder in this profile')
     client = Client(profile)
     manager = Managed(connection.profile, profile) if profile['mode'] == 'managed' else None
     with service_lock(profile):
@@ -718,6 +758,10 @@ def _generate(connection, requests):
                 raise StrataError('Same-GPU mode requires parallel=1')
             if profile.get('same_gpu') and status['activity']['in_flight']:
                 raise StrataError('Strata is busy with another request; retry after it finishes')
+            if profile.get('allow_lifecycle') and status['activity']['in_flight']:
+                raise StrataError('Strata is busy with another request; automatic lifecycle cleanup requires an idle service')
+            if needs_vision and not status['vision']['enabled']:
+                raise StrataError('Enable the bundled vision encoder in this profile')
             cleanup_required = bool(profile.get('allow_lifecycle'))
             if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
                 if cleanup(client, profile, manager, None):
@@ -805,6 +849,12 @@ def _control(connection, action, check=interrupted):
             if action == 'load' and (profile.get('same_gpu') or status is None) and profile.get('allow_lifecycle'):
                 stopped = cleanup(client, profile, manager, baseline)
                 if status is not None:
-                    status['after_release'] = ({'service':'strata','stopped':True,'released':True} if stopped
-                                               else client.request('/v1/status', timeout=5, check=None))
+                    if stopped:
+                        status['after_release'] = {'service':'strata','stopped':True,'released':True}
+                    else:
+                        final = service_status(client.request('/v1/status', timeout=5, check=None))
+                        if final['activity']['in_flight'] or final['loaded'] or any(
+                                process['running'] or process['loaded'] or process['starting'] for process in final['processes'].values()):
+                            raise StrataError('Strata resources became active after release; downstream work is blocked')
+                        status['after_release'] = final
         return status

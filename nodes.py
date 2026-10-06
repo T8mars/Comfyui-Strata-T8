@@ -216,7 +216,10 @@ class StrataConnection(Base):
     @classmethod
     def IS_CHANGED(cls, profile):
         path = core.profile_path(profile)
-        return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else 'missing'
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else 'missing'
+        except OSError:
+            raise core.StrataError('Saved profile could not be read for its cache fingerprint') from None
 
     def run(self, profile):
         core.read_profile(profile)
@@ -458,6 +461,9 @@ class StrataControl(Base):
         return float('nan')
 
     def run(self, connection, action='status', text='', images=None):
+        if not isinstance(text, str):
+            raise core.StrataError('Control passthrough text must be a text string')
+        core.text_unicode(text)
         status = core.control(connection, action)
         return {'ui': {'text': [json.dumps(status, ensure_ascii=False, indent=2)]},
                 'result': (connection, json.dumps(status, ensure_ascii=False), text, images)}
