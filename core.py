@@ -26,6 +26,36 @@ class StrataError(RuntimeError):
     pass
 
 
+class StructuredServiceError(StrataError):
+    """A parsed structured-output rejection, rather than words in an arbitrary diagnostic."""
+    pass
+
+
+def request_payload(body):
+    """Match protocol 1 JSON limits before acquiring a model or sending a request."""
+    if body is None:
+        return None
+    pending = [(body, 0)]
+    while pending:
+        value, depth = pending.pop()
+        if isinstance(value, (dict, list, tuple)):
+            if depth >= 128:
+                raise StrataError('Service request JSON exceeds 128 container levels')
+            if isinstance(value, dict):
+                if any(not isinstance(key, str) for key in value):
+                    raise StrataError('Service request JSON member names must be text')
+                pending.extend((item, depth+1) for item in value.values())
+            else:
+                pending.extend((item, depth+1) for item in value)
+    try:
+        payload = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise StrataError('Service request must contain valid JSON data, Unicode and finite numbers') from None
+    if len(payload) > 64*1024**2:
+        raise StrataError('Service request exceeds 64 MiB; resize images or reduce the request')
+    return payload
+
+
 def json_loads(text):
     """Reject ambiguous members, non-JSON constants and numbers that overflow float."""
     def number(value):
@@ -280,9 +310,7 @@ class Client:
                 headers = {'Content-Type': 'application/json'}
                 if self.profile.get('api_key'):
                     headers['Authorization'] = 'Bearer '+self.profile['api_key']
-                payload = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8') if body is not None else None
-                if payload is not None and len(payload) > 64*1024**2:
-                    raise StrataError('Service request exceeds 64 MiB; resize images or reduce the request')
+                payload = request_payload(body)
                 if cancelled.is_set():
                     return
                 conn.connect()
@@ -330,7 +358,8 @@ class Client:
                     error = data.get('error') or {}
                     if not isinstance(error, dict):
                         error = {'message': str(error)}
-                    raise StrataError(f"HTTP {response.status} {error.get('code') or error.get('type') or ''}: {error.get('message', 'service rejected request')}")
+                    error_cls = StructuredServiceError if response.status in (502, 422) and error.get('code') == 'structured_output_failed' else StrataError
+                    raise error_cls(f"HTTP {response.status} {error.get('code') or error.get('type') or ''}: {error.get('message', 'service rejected request')}")
                 result['data'] = data
             except Exception as error:
                 result['error'] = error
@@ -361,7 +390,7 @@ class Client:
                 if isinstance(error, StrataError):
                     message = str(error)
                     key = self.profile.get('api_key')
-                    raise StrataError(message.replace(key, '[redacted]') if key else message) from None
+                    raise type(error)(message.replace(key, '[redacted]') if key else message) from None
                 raise StrataError(f'Strata connection failed: {type(error).__name__}') from None
             return result['data']
         except BaseException:
@@ -686,7 +715,7 @@ def gpu_handoff(profile):
     mm.unload_all_models()
     mm.soft_empty_cache()
     free, total = torch.cuda.mem_get_info(device)
-    if free < int(profile.get('min_free_vram_mib', 12288))*1024**2:
+    if free < float(profile.get('min_free_vram_mib', 12288))*1024**2:
         raise StrataError(f'GPU conflict: only {free//1024**2} MiB free after ComfyUI unload')
     if psutil.virtual_memory().available < float(profile.get('min_free_ram_gib', 60))*1024**3:
         raise StrataError('Insufficient available RAM after ComfyUI offload; close other models or lower the profile threshold only after measurement')
@@ -730,6 +759,12 @@ def cleanup(client, profile, manager, baseline):
 
 
 def generate(connection, requests):
+    if not isinstance(requests, list) or not 1 <= len(requests) <= 64 or any(
+            not isinstance(request, dict) or not isinstance(request.get('messages'), list) or not request['messages']
+            or any(not isinstance(message, dict) for message in request['messages']) for request in requests):
+        raise StrataError('Provide 1–64 request objects with a nonempty array of message objects')
+    for request in requests:
+        request_payload(request)
     with profile_lock(connection.profile):
         return _generate(connection, requests)
 

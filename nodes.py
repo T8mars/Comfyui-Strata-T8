@@ -50,6 +50,8 @@ def request(prompt, system='', history='[]', **options):
         raise core.StrataError('History must be a JSON array of at most 256 role/content text messages')
     messages = ([{'role': 'system', 'content': system}] if system else []) + messages + [{'role': 'user', 'content': prompt}]
     options.pop('refresh', None)
+    if any(key in options for key in ('messages', 'model', 'stream')):
+        raise core.StrataError('Request options cannot override messages, model or stream')
     bounds = {'max_tokens': (1, 131072, True), 'temperature': (0, 2, False),
               'top_p': (0, 1, False), 'top_k': (1, 64, True), 'seed': (0, 2147483647, True)}
     for key, (low, high, integer) in bounds.items():
@@ -291,7 +293,7 @@ class StrataStructured(Base):
                 value = validated(text, schema)
                 break
             except core.StrataError as error:
-                if attempt == repair_attempts or (not isinstance(error, StructuredOutputError) and 'structured_output_failed' not in str(error)):
+                if attempt == repair_attempts or not isinstance(error, (StructuredOutputError, core.StructuredServiceError)):
                     raise
                 req['messages'][0]['content'] += '\nReturn valid JSON only, matching every required field and its type.'
         prompts = [shot['prompt'] for shot in value.get('shots', [])] if isinstance(value, dict) and isinstance(value.get('shots'), list) and all(isinstance(s, dict) and isinstance(s.get('prompt'), str) for s in value['shots']) else []

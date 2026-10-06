@@ -85,7 +85,7 @@ Python 3.10+；已完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 12
 
 节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
 
-[第六组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND6-NODES.md)；节点支持当前 ComfyUI V3 API，并保留 V1 适配。
+[第七组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND7-NODES.md)；节点支持当前 ComfyUI V3 API，并保留 V1 适配。
 
 ## 来源与致谢
 

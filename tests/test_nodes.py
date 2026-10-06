@@ -228,7 +228,7 @@ class Structured(unittest.TestCase):
         schema = json.dumps({'type': 'object', 'required': ['prompt'], 'properties': {'prompt': {'type': 'string'}}})
         good = [(' {"prompt":"ok"}', '', '{}')]
         for failure in ([('not json', '', '{}')], [('{"prompt":123}', '', '{}')],
-                        core.StrataError('HTTP 422 structured_output_failed: invalid')):
+                        core.StructuredServiceError('HTTP 422 structured_output_failed: invalid')):
             with mock.patch.object(core, 'generate', side_effect=[failure, good]) as generate:
                 result = nodes.StrataStructured().run(core.Connection('test'), 'hi', schema=schema, repair_attempts=1)
                 self.assertEqual(json.loads(result[0]), {'prompt': 'ok'})
