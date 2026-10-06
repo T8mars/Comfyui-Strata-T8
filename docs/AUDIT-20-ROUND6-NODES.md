@@ -53,4 +53,8 @@ Windows byte-range 锁采用 [Python 官方 msvcrt 文档](https://docs.python.o
 
 ## 主 Agent 正式 GPU 和发行验收
 
-主 Agent 后续将补充最终三类 GPU 工作流、Windows/Linux CI、GitHub/Registry 发行提交及资产核对证据，与上面的 CPU/替身测试区分。
+ComfyUI 0.38.0 / Torch 2.7.0+cu128 / RTX 4060 Ti 16GB / 128GB RAM / DreamShaper 8，冻结源码完成文字→绘图、图片理解→绘图、两镜头分镜→批量绘图，分别 28.16s、35.22s、58.34s，共 4 张图。队列 load、缓存重复及每次文字/视觉进程释放通过，最后停止自有托管服务。8 份功能源码摘要与发行文件一致；验证档案空闲显存门槛 8GiB，产品默认 12GiB。初次派发在服务 readiness 前连接失败，没有计作通过；上述数字为 readiness 后完整重跑。
+
+[节点 1.0.5](https://github.com/T8mars/Comfyui-Strata-T8/releases/tag/v1.0.5) 为 `0452eb109136fe0c1958d5133612a5af7f31df0e`，配套[运行包 0.1.39-t8.13](https://github.com/T8mars/Strata-T8/releases/tag/v0.1.39-t8.13) 为 `d0a3c5ab0e1775583aba7a7b15c79d6b502f5947`。[Windows/Linux CI](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37469986731) 成功，Windows 188 例全执行，Linux 跳过 1 个 Windows 专属用例；[官方 Registry 发布](https://github.com/T8mars/Comfyui-Strata-T8/actions/runs/37469987350) 成功。GitHub ZIP SHA256 `71717f623abebe949b72164ab8a378ab3d66474cd329cd1c6adc07eb843b47d8`，Registry ZIP SHA256 `ea72c2668725d6fa0de39eb17ff8f5ec35690c7ac41ddcbb1147308aeba743b9`；所有代码逐字节匹配发布提交，10 个节点可导入。
+
+Publisher `t8star`，CDN 包可取得；[Registry 接口](https://api.comfy.org/nodes/strata-t8/versions/1.0.5) 核查为 `NodeVersionStatusPending`。审核期间使用 GitHub Release。详细证据见[主仓第六组报告](https://github.com/T8mars/Strata-T8/blob/main/docs/AUDIT-20-ROUND6-T8.md)。此段为发布后补充，没有覆盖已发布资产。
