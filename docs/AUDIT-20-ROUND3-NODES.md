@@ -138,7 +138,7 @@
 
 - 修复类别位于 R01/R02/R03/R05/R06/R07/R09/R10/R12/R14/R16/R18/R19；R04/R08/R11/R13/R15/R17/R20 检查通过且无新修复。
 - 文件、JSON、PNG、真实 HTTP framing 和 Node.js handlers 实际执行；进程 PID/argv/children、生命周期状态及 handoff 是替身。官方 io 类、torch tensor、PIL 为真实实现，探针 server 注册及 interruption hook 为替身以保持 CPU-only。
-- 没有下载模型，没有停止或修改用户 8082、8080、8188、8189 服务，没有改版本、README、发布工作流或执行提交/发布。
-- 本组没有 Linux 托管原生进程、AMD 同卡交接、多 GPU 或 GPU 显存测量。Windows/Linux 单元 CI 及正式绘图由主 Agent 最后统一验收。
+- 子 Agent 审计阶段没有下载模型，没有停止或修改用户 8082、8080、8188、8189 服务，没有改版本、README、发布工作流或执行提交/发布；版本及发布由主 Agent 处理。
+- 子 Agent 审计阶段没有 Linux 托管原生进程、AMD 同卡交接、多 GPU 或 GPU 显存测量。主 Agent 后续的 Windows/Linux CI、正式绘图及发行验证见 [整合包最终报告](https://github.com/T8mars/Strata-T8/blob/main/docs/AUDIT-20-ROUND3-T8.md)。
 - 最后集成复跑曾命中主仓正在修改的 referencing 参数名拼写错误（default_spec）；即时反馈后主 Agent 修为实际签名 default_specification，随后完整 105 例通过。没有以替身或跳过掩盖该集成问题。
 - 20 轮是 20 个不同检查焦点，不等于 20 个 BUG，也不证明项目不存在其他缺陷。
