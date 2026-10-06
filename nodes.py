@@ -43,7 +43,7 @@ def sampling():
 def request(prompt, system='', history='[]', **options):
     if not isinstance(prompt, str) or not isinstance(system, str) or not isinstance(history, str):
         raise core.StrataError('Prompt, system and history must be text strings')
-    messages = json.loads(history)
+    messages = core.json_loads(history)
     if not isinstance(messages, list) or len(messages) > 256 or any(not isinstance(m, dict) or m.get('role') not in ('system', 'user', 'assistant') or not isinstance(m.get('content'), str) for m in messages):
         raise core.StrataError('History must be a JSON array of at most 256 role/content text messages')
     messages = ([{'role': 'system', 'content': system}] if system else []) + messages + [{'role': 'user', 'content': prompt}]
@@ -63,36 +63,60 @@ def request(prompt, system='', history='[]', **options):
 
 
 def check_schema(schema):
-    from jsonschema import Draft202012Validator
-    Draft202012Validator.check_schema(schema)
+    from jsonschema import Draft202012Validator, SchemaError
+    from referencing import Registry
+    from referencing.exceptions import Unresolvable
+    from referencing.jsonschema import DRAFT202012
+    try:
+        Draft202012Validator.check_schema(schema)
+    except (SchemaError, RecursionError):
+        raise core.StrataError('Invalid JSON Schema') from None
     # No HTTP/file reference retrieval in schemas supplied by a workflow.
-    def local_refs(value):
+    root = DRAFT202012.create_resource(schema)
+    resolver = Registry().with_resource('', root).crawl().resolver_with_root(root)
+    visited = set()
+    def local_refs(resource, scoped):
+        value = resource.contents
+        if id(value) in visited:
+            return
+        visited.add(id(value))
         if isinstance(value, dict):
-            for key, child in value.items():
-                if key in ('$ref', '$dynamicRef') and not child.startswith('#'):
+            for key in ('$ref', '$dynamicRef'):
+                if key not in value:
+                    continue
+                reference = value[key]
+                if not reference.startswith('#'):
                     raise core.StrataError('JSON Schema references must be local fragments')
-                local_refs(child)
-        elif isinstance(value, list):
-            for child in value:
-                local_refs(child)
-    local_refs(schema)
+                try:
+                    resolved = scoped.lookup(reference)
+                except Unresolvable:
+                    raise core.StrataError('JSON Schema local reference does not identify an existing schema') from None
+                try:
+                    Draft202012Validator.check_schema(resolved.contents)
+                except SchemaError:
+                    raise core.StrataError('JSON Schema local reference must identify a valid schema') from None
+                # A pointer may make const/enum data into an executable schema; validate that target too.
+                local_refs(DRAFT202012.create_resource(resolved.contents), resolved.resolver)
+        # Follow schema-valued keywords only; $ref fields in const/enum are ordinary data.
+        for child in resource.subresources():
+            local_refs(child, scoped.in_subresource(child))
+    try:
+        local_refs(root, resolver)
+    except RecursionError:
+        raise core.StrataError('JSON Schema is too deeply nested') from None
 
 
 class StructuredOutputError(core.StrataError):
     pass
 
 
-def invalid_json_constant(value):
-    raise ValueError('Non-finite JSON number')
-
-
 def validated(text, schema):
     from jsonschema import Draft202012Validator, ValidationError
     check_schema(schema)
     try:
-        value = json.loads(text, parse_constant=invalid_json_constant)
+        value = core.json_loads(text)
         Draft202012Validator(schema).validate(value)
-    except (ValueError, ValidationError):
+    except (core.StrataError, ValueError, ValidationError):
         raise StructuredOutputError('Model output is not valid JSON matching the schema') from None
     return value
 
@@ -177,7 +201,7 @@ class StrataStructured(Base):
     def run(self, connection, prompt, schema='', system='', repair_attempts=0, **options):
         if type(repair_attempts) is not int or not 0 <= repair_attempts <= 2:
             raise core.StrataError('Repair attempts must be an integer between 0 and 2')
-        schema = json.loads(schema) if schema else STORY_SCHEMA
+        schema = core.json_loads(schema) if schema else STORY_SCHEMA
         # Validate schema before contacting/loading a model.
         check_schema(schema)
         req = request(prompt, system, **options)
@@ -236,7 +260,7 @@ class StrataExtract(Base):
                              'expected_type': (['any', 'string', 'number', 'array', 'object', 'boolean'],)}}
 
     def run(self, json_text, pointer='', item_field='', expected_type='any'):
-        value = globals()['pointer'](json.loads(json_text, parse_constant=invalid_json_constant), pointer)
+        value = globals()['pointer'](core.json_loads(json_text), pointer)
         types = {'string': str, 'number': (int, float), 'array': list, 'object': dict, 'boolean': bool}
         if expected_type != 'any' and expected_type not in types:
             raise core.StrataError('Unknown expected JSON type')
@@ -261,7 +285,7 @@ class StrataNumber(Base):
         return {'required': {'json_text': ('STRING', {'forceInput': True}), 'pointer': ('STRING', {'default': '/shots/0/duration'})}}
 
     def run(self, json_text, pointer):
-        value = globals()['pointer'](json.loads(json_text, parse_constant=invalid_json_constant), pointer)
+        value = globals()['pointer'](core.json_loads(json_text), pointer)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise core.StrataError('The selected JSON field must be a number')
         try:
@@ -288,7 +312,7 @@ class StrataImage(Base):
         req = request(question, selected, **options)
         if not isinstance(schema, str):
             raise core.StrataError('JSON Schema must be text')
-        parsed = json.loads(schema) if schema.strip() else None
+        parsed = core.json_loads(schema) if schema.strip() else None
         if parsed is not None:
             check_schema(parsed)
             req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'image_analysis', 'schema': parsed}}

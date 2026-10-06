@@ -132,7 +132,8 @@ class BatchHTTP(unittest.TestCase):
         client.request.return_value = dict(status, processes={})
         with self.assertRaisesRegex(core.StrataError, 'External service release'):
             core.cleanup(client, {'cleanup_timeout_s': .01}, None, None)
-        self.assertEqual(client.request.call_count, 1)  # Never POST unload after an untrusted idle response.
+        self.assertTrue(client.request.call_args_list)
+        self.assertTrue(all(call.args[0] == '/v1/status' for call in client.request.call_args_list))  # Never POST unload after an untrusted idle response.
 
     def test_cleanup_cannot_claim_success_without_owned_stop(self):
         client, manager = mock.Mock(), mock.Mock()

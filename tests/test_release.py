@@ -15,6 +15,21 @@ spec.loader.exec_module(builder)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_tracked_binary_or_onnx_weights_cannot_enter_public_web_or_examples(self):
+        for name in ('web/experts.bin', 'examples/accidental.onnx', 'examples/accidental.pth'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for shipping in builder.SHIPPING:
+                    (root/shipping).write_text('public shipping file')
+                (root/'pyproject.toml').write_text((ROOT/'pyproject.toml').read_text())
+                (root/'meta.json').write_text((ROOT/'meta.json').read_text())
+                weight = root/name
+                weight.parent.mkdir(parents=True, exist_ok=True)
+                weight.write_bytes(b'accidental tensor fixture')
+                tracked = '\0'.join([*builder.SHIPPING, name])+'\0'
+                with mock.patch.object(builder, 'ROOT', root), mock.patch.object(builder.subprocess, 'check_output', return_value=tracked.encode()):
+                    with self.assertRaisesRegex(ValueError, 'Model'): builder.main()
+
     def test_metadata_uses_independent_version_and_publisher(self):
         project = tomllib.loads((ROOT/'pyproject.toml').read_text())
         meta = json.loads((ROOT/'meta.json').read_text())

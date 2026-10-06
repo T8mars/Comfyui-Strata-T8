@@ -8,7 +8,10 @@ dist/
 *.gguf
 *.safetensors
 *.pt
+*.pth
 *.ckpt
+*.onnx
+*.bin
 .env
 profiles/
 _strata/

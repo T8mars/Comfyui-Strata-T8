@@ -30,13 +30,17 @@ def register():
     @server.routes.get('/strata_t8/profiles')
     async def get_profiles(request):
         local(request)
-        values = {}
+        values, errors = {}, {}
         for name in core.profiles():
             if core.profile_path(name).is_file():
-                value = core.read_profile(name)
+                try:
+                    value = core.read_profile(name)
+                except core.StrataError:
+                    errors[name] = 'Saved profile could not be read; provide a complete replacement profile and API key'
+                    continue
                 values[name] = {k: v for k, v in value.items() if k != 'api_key'}
                 values[name]['key_configured'] = bool(value.get('api_key'))
-        return web.json_response({'profiles': values, 'home': str(core.HOME)})
+        return web.json_response({'profiles': values, 'profile_errors': errors, 'home': str(core.HOME)})
 
     @server.routes.post('/strata_t8/profile')
     async def set_profile(request):

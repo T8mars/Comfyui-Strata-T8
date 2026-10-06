@@ -28,7 +28,7 @@ def main():
             file = ROOT/name
             if file.is_symlink() or not file.resolve().is_relative_to(ROOT.resolve()):
                 raise ValueError(f'Linked shipping file: {name}')
-            if file.suffix.lower() in ('.gguf', '.safetensors', '.pt', '.pth', '.ckpt'):
+            if file.suffix.lower() in ('.gguf', '.safetensors', '.pt', '.pth', '.ckpt', '.onnx', '.bin'):
                 raise ValueError(f'Model in node package: {name}')
             data = file.read_bytes()
             manifest['files'].append({'path': name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()})

@@ -9,7 +9,10 @@ features.json
 *.gguf
 *.safetensors
 *.pt
+*.pth
 *.ckpt
+*.onnx
+*.bin
 .env
 profiles/
 .local/

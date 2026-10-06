@@ -25,6 +25,21 @@ class StrataError(RuntimeError):
     pass
 
 
+def json_loads(text):
+    """Reject both non-JSON constants and finite-looking exponents that overflow float."""
+    def number(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError('Non-finite JSON number')
+        return parsed
+    def constant(value):
+        raise ValueError('Non-finite JSON number')
+    try:
+        return json.loads(text, parse_float=number, parse_constant=constant)
+    except (TypeError, ValueError, RecursionError):
+        raise StrataError('Invalid JSON: use valid JSON text with finite numbers') from None
+
+
 @dataclass(frozen=True)
 class Connection:
     profile: str
@@ -33,18 +48,30 @@ class Connection:
 def profile_path(name):
     if not isinstance(name, str) or not re.fullmatch(r'[\w-]{1,64}', name):
         raise StrataError('Profile name: 1–64 letters, digits, underscores or hyphens')
+    if re.fullmatch(r'(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])', name, re.IGNORECASE):
+        raise StrataError('Profile name must not be a reserved Windows device name')
     return HOME/'profiles'/f'{name}.json'
 
 
 def profiles():
-    return sorted(p.stem for p in (HOME/'profiles').glob('*.json')) or ['default']
+    names = []
+    for path in (HOME/'profiles').glob('*.json'):
+        try:
+            profile_path(path.stem)
+        except StrataError:
+            continue
+        names.append(path.stem)
+    return sorted(names) or ['default']
 
 
 def read_profile(name):
     path = profile_path(name)
     if not path.is_file():
         raise StrataError('Create this local profile in the Strata panel first; workflows contain only its name.')
-    return normalize_profile(json.loads(path.read_text(encoding='utf-8')))
+    try:
+        return normalize_profile(json_loads(path.read_text(encoding='utf-8')))
+    except (OSError, UnicodeError):
+        raise StrataError('Saved profile could not be read') from None
 
 
 def normalize_profile(profile):
@@ -54,8 +81,14 @@ def normalize_profile(profile):
     if profile.get('mode') not in ('managed', 'external'):
         raise StrataError('Profile mode must be managed or external')
     if profile['mode'] == 'managed':
-        if not isinstance(profile.get('runtime'), str) or not profile['runtime'].strip() or not isinstance(profile.get('data_dir'), str) or not profile['data_dir'].strip():
-            raise StrataError('Managed profiles require runtime and data_dir paths')
+        for key in ('runtime', 'data_dir'):
+            value = profile.get(key)
+            if not isinstance(value, str) or not value.strip() or any(ord(c) < 32 or ord(c) == 127 for c in value):
+                raise StrataError('Managed profiles require runtime and data_dir paths without control characters')
+            try:
+                profile[key] = str(Path(value).expanduser().resolve())
+            except (OSError, ValueError):
+                raise StrataError(f'Invalid managed path: {key}') from None
         port = profile.get('port', 8082)
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise StrataError('Managed port must be an integer between 1 and 65535')
@@ -118,8 +151,13 @@ def _save_profile(name, profile):
     if not isinstance(profile, dict):
         raise StrataError('Profile must be a JSON object')
     profile = dict(profile)
-    old = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     if profile.get('api_key') == '__KEEP__':
+        try:
+            old = json_loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+            if not isinstance(old, dict):
+                raise StrataError('Saved profile must be an object')
+        except (StrataError, OSError, UnicodeError):
+            raise StrataError('Saved profile is damaged; provide a replacement API key before saving') from None
         profile['api_key'] = old.get('api_key', '')
     if profile.get('mode') == 'managed' and not profile.get('api_key'):
         profile['api_key'] = uuid.uuid4().hex + uuid.uuid4().hex
@@ -193,6 +231,7 @@ class Client:
         conn.auto_open = 0  # A cancelled/closed socket must never reconnect and send a late request.
         result, finished, cancelled = {}, threading.Event(), threading.Event()
         def work():
+            response = None
             try:
                 headers = {'Content-Type': 'application/json'}
                 if self.profile.get('api_key'):
@@ -202,13 +241,20 @@ class Client:
                 if cancelled.is_set():
                     return
                 conn.sock.settimeout(wait_s)
-                conn.request('POST' if body is not None else 'GET', path, json.dumps(body).encode() if body is not None else None, headers)
+                conn.request('POST' if body is not None else 'GET', path, json.dumps(body, allow_nan=False).encode() if body is not None else None, headers)
                 response = conn.getresponse()
                 raw = response.read(16*1024**2+1)
                 if len(raw) > 16*1024**2:
                     raise StrataError('Service response exceeds 16 MiB')
-                data = json.loads(raw)
+                try:
+                    data = json_loads(raw)
+                except StrataError:
+                    if response.status >= 400:
+                        raise StrataError(f'HTTP {response.status}: service rejected request (invalid JSON response)') from None
+                    raise
                 if not isinstance(data, dict):
+                    if response.status >= 400:
+                        raise StrataError(f'HTTP {response.status}: service rejected request (non-object response)')
                     raise StrataError('Service response must be a JSON object')
                 if response.status >= 400:
                     error = data.get('error') or {}
@@ -219,17 +265,25 @@ class Client:
             except Exception as error:
                 result['error'] = error
             finally:
-                conn.close()
-                finished.set()
+                try:
+                    if response is not None:
+                        response.close()
+                finally:
+                    try:
+                        conn.close()
+                    finally:
+                        finished.set()
         worker = threading.Thread(target=work, daemon=True, name='strata-http')
         deadline = time.monotonic()+wait_s
         worker.start()
         try:
-            while not finished.wait(.1):
+            while not finished.wait(min(.1, max(0, deadline-time.monotonic()))):
                 if time.monotonic() >= deadline:
                     raise StrataError('Strata request exceeded its total timeout')
                 if check:
                     check()
+            if time.monotonic() >= deadline:
+                raise StrataError('Strata request exceeded its total timeout')
             if check:
                 check()
             if 'error' in result:
@@ -256,7 +310,7 @@ class Client:
 def service_status(data):
     """Require the resource state used to authorize load/release, rather than treating gaps as idle."""
     try:
-        if data['service'] != 'strata' or data['protocol_version'] != 1 or not isinstance(data['model'], str) or not data['model']:
+        if data['service'] != 'strata' or type(data['protocol_version']) is not int or data['protocol_version'] != 1 or not isinstance(data['model'], str) or not data['model']:
             raise ValueError()
         if type(data['loaded']) is not bool or type(data['vision']['enabled']) is not bool:
             raise ValueError()
@@ -264,9 +318,11 @@ def service_status(data):
             raise ValueError()
         if type(data['concurrency']['serving']) is not int or data['concurrency']['serving'] < 1:
             raise ValueError()
-        for name in ('engine', 'vision'):
-            process = data['processes'][name]
-            if any(type(process[key]) is not bool for key in ('running', 'loaded', 'starting')):
+        processes = data['processes']
+        if not isinstance(processes, dict) or not {'engine', 'vision'}.issubset(processes):
+            raise ValueError()
+        for process in processes.values():
+            if not isinstance(process, dict) or any(type(process[key]) is not bool for key in ('running', 'loaded', 'starting')):
                 raise ValueError()
     except (KeyError, TypeError, ValueError):
         raise StrataError('Incomplete or incompatible Strata-T8 protocol version 1 status') from None
@@ -475,6 +531,7 @@ class Managed:
                 raise
             finally:
                 log.close()
+            check()
             instance = uuid.uuid4().hex
             env = dict(os.environ, STRATA_API_KEY=self.profile['api_key'], STRATA_INSTANCE_ID=instance)
             with open(self.dir/'service.log', 'ab', buffering=0) as log:
@@ -536,17 +593,22 @@ def gpu_handoff(profile):
 def cleanup(client, profile, manager, baseline):
     deadline = time.monotonic()+float(profile.get('cleanup_timeout_s', 90))
     last = None
+    def remaining(limit):
+        budget = deadline-time.monotonic()
+        if budget <= 0:
+            raise StrataError('Resource release timed out')
+        return min(limit, budget)
     while time.monotonic() < deadline:
         try:
-            status = service_status(client.request('/v1/status', check=None, timeout=3))
+            status = service_status(client.request('/v1/status', check=None, timeout=remaining(3)))
             if not status['activity']['in_flight']:
-                client.request('/v1/unload', {}, check=None, timeout=5)
-                status = service_status(client.request('/v1/status', check=None, timeout=3))
-                if not status['loaded'] and not any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values()):
+                client.request('/v1/unload', {}, check=None, timeout=remaining(5))
+                status = service_status(client.request('/v1/status', check=None, timeout=remaining(3)))
+                if not status['activity']['in_flight'] and not status['loaded'] and not any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values()):
                     break
         except (StrataError, KeyError) as error:
             last = error
-        time.sleep(.2)
+        time.sleep(min(.2, max(0, deadline-time.monotonic())))
     else:
         if manager:
             if not manager.stop():
@@ -645,6 +707,8 @@ def _control(connection, action, check=interrupted):
             manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile) if profile.get('same_gpu') else None)
         if action == 'load' and profile.get('same_gpu'):
             status = service_status(client.request('/v1/status', timeout=5, check=check))
+            if status['concurrency']['serving'] != 1:
+                raise StrataError('Same-GPU mode requires parallel=1')
             if status.get('protocol_version') != 1 or status['activity']['in_flight']:
                 raise StrataError('Load requires an idle compatible Strata-T8 service')
             cleanup(client, profile, manager, None)

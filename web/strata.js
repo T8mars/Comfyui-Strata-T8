@@ -6,8 +6,15 @@ const defaults = {mode:"external",url:"http://127.0.0.1:8080",allow_lifecycle:fa
     min_free_vram_mib:12288,min_free_ram_gib:60};
 async function request(path, body) {
     const response = await api.fetchApi(path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
-    const data = await response.json();
-    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    let data;
+    try {data=await response.json();} catch {throw new Error(`HTTP ${response.status}: response is not valid JSON`);}
+    if (!data || typeof data!=="object") throw new Error(`HTTP ${response.status}: invalid response object`);
+    if (!response.ok || data.error) {
+        const error=data.error;
+        const message=typeof error==="string" ? error : [error?.message,error?.details].filter(value=>typeof value==="string" && value).join(": ");
+        const nodes=Object.values(data.node_errors || {}).flatMap(node=>node.errors || []).map(error=>[error.message,error.details].filter(value=>typeof value==="string" && value).join(": ")).filter(Boolean);
+        throw new Error([message || `HTTP ${response.status}`, ...nodes].join("\n"));
+    }
     return data;
 }
 function renderPanel(container) {
@@ -34,7 +41,8 @@ function renderPanel(container) {
             for (const profile of Object.keys(saved)) {const option=document.createElement("option");option.value=profile;option.textContent=profile;select.append(option);}
             if(saved[name.value]) select.value=name.value;
             if(select.value) select.onchange();
-            status.textContent=`本机配置目录：${data.home}\n保存后刷新页面，再选择 Strata 连接配置。`;
+            const errors=Object.keys(data.profile_errors || {}).map(profile=>`配置 ${profile} 无法读取；输入完整配置和替换 API key 后保存。`);
+            status.textContent=[`本机配置目录：${data.home}\n保存后刷新页面，再选择 Strata 连接配置。`,...errors].join("\n");
         } catch(error) {report(error);}
     }
     select.onchange=()=>{name.value=select.value;const value={...saved[select.value]};delete value.key_configured;fields.value=JSON.stringify(value,null,2);key.value="";};
@@ -49,7 +57,9 @@ function renderPanel(container) {
         const button=document.createElement("button");button.textContent=label;
         button.onclick=async()=>{button.disabled=true;status.textContent="处理中…";try{
             if(action!=="status") {
-                status.textContent=JSON.stringify(await request("/prompt",{client_id:api.clientId,prompt:{"1":{class_type:"StrataT8Connection",inputs:{profile:name.value}},"2":{class_type:"StrataT8Control",inputs:{connection:["1",0],action}}}}),null,2)+"\n服务操作已进入 ComfyUI 队列；同卡加载验证返回前会释放显存。";
+                const queued=await request("/prompt",{client_id:api.clientId,prompt:{"1":{class_type:"StrataT8Connection",inputs:{profile:name.value}},"2":{class_type:"StrataT8Control",inputs:{connection:["1",0],action}}}});
+                if(typeof queued.prompt_id!=="string" || !queued.prompt_id) throw new Error("ComfyUI 未返回队列任务 ID；服务操作未确认入队。");
+                status.textContent=JSON.stringify(queued,null,2)+"\n服务操作已进入 ComfyUI 队列；同卡加载验证返回前会释放显存。";
             } else status.textContent=JSON.stringify(await request("/strata_t8/control",{name:name.value,action}),null,2);
         }catch(error){report(error);}finally{button.disabled=false;}};
         actions.append(button);
