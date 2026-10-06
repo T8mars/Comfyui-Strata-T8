@@ -241,6 +241,7 @@ class ManagedBoundaries(unittest.TestCase):
 
 
 class BrowserBoundaries(unittest.TestCase):
+    """The subprocess budget includes hosted runner startup; UI behavior remains asserted."""
     @unittest.skipUnless(shutil.which('node'), 'Node.js is needed for the browser error contract test')
     def test_comfy_queue_validation_error_and_non_json_response_are_readable(self):
         script = r'''
@@ -257,7 +258,7 @@ vm.runInContext(fs.readFileSync(process.argv[1],'utf8').replace(/^import .*;\r?\
   catch(error) { if(!error.message.includes('HTTP 503')) throw error; }
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
-        result = subprocess.run([shutil.which('node'), '-e', script, str(fixture.NODE_ROOT/'web/strata.js')], capture_output=True, encoding='utf-8', timeout=10)
+        result = subprocess.run([shutil.which('node'), '-e', script, str(fixture.NODE_ROOT/'web/strata.js')], capture_output=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is needed for the browser queue receipt test')
@@ -284,7 +285,7 @@ vm.runInContext(fs.readFileSync(process.argv[1],'utf8').replace(/^import .*;\r?\
   if(load.disabled) throw Error('busy state remains after queue error');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
-        result = subprocess.run([shutil.which('node'), '-e', script, str(fixture.NODE_ROOT/'web/strata.js')], capture_output=True, encoding='utf-8', timeout=10)
+        result = subprocess.run([shutil.which('node'), '-e', script, str(fixture.NODE_ROOT/'web/strata.js')], capture_output=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
 
 

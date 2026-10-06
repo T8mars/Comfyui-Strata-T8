@@ -144,6 +144,8 @@
 
 发行前另补一项权重边界回归：GitHub 构建器拒绝 `.bin/.onnx`，Registry 和 Git 忽略列表覆盖全部常见权重扩展名。最终本机 **84 tests OK，无 skip，10.303s**；包括本组新增 29 例和额外 1 例发行检查。官方 `comfy node validate` 与 `comfy node pack` 均成功。
 
+发布后主仓 Windows CI 首次 Node.js 子进程超过 10 秒。没有 JS 异常或行为断言失败，节点 Windows/Linux CI 已通过；子 Agent 复核两个脚本无网络、计时器或持久句柄，本机分别约 0.051 秒。仅把浏览器测试的进程启动预算增至 30 秒，保留全部行为断言和明确超时；不推断具体系统延迟来源，不升级或覆盖已发布的 1.0.1。
+
 - 主测试 Python 为 `E:\Strata\runtime\python\python.exe`。实际 ComfyUI API/CPU tensor 探针额外使用主 Agent 提供的 ComfyUI Python `G:\comfyUI(1)\comfyUI\.ext\python.exe`，源码 `E:\Strata\.portable-build\comfyui-validation-source\ComfyUI-master`，依赖目录 `E:\Strata\.portable-build\comfy-deps`。
 - 探针设置 CUDA_VISIBLE_DEVICES=-1，并禁用可选 Triton GPU kernel 发现；官方 io 类、torch tensor 和 PIL 都是真实实现。未启动 ComfyUI server，也未调用 GPU handoff。探针中的 server 注册入口和 interruption hook 使用替身，避免导入实际服务器管理模块。
 - 准备取消、status 资源反例、所有权等仍使用替身；HTTP framing、PNG、文件和 ZIP 是实际执行。没有下载权重、没有原生 GPU 性能或显存测量。
