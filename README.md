@@ -81,7 +81,9 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 ## 环境与更新
 
-Python 3.10+；已完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 128GB RAM 的三类实际绘图验收。Windows 整合包需要 Windows 10 1903+/11 x64、AVX2 CPU、兼容显卡驱动，IQ3_S 建议 96GB 以上 RAM。默认同卡门槛为 12GiB 空闲显存、60GiB 空闲 RAM；其他后台进程仍会占用资源。AMD 文本以 Strata 上游支持列表为准，Windows AMD 视觉尚不支持，AMD 档案使用 `vision:no`。
+节点 **1.0.6** 兼容 Strata-T8 **0.1.40-t8.1 同步开发版**（上游 [v0.1.40.1](https://github.com/Niko1221/Strata/releases/tag/v0.1.40.1)），继续使用协议 1，最低运行包版本为 `0.1.39-t8.14`。新版已通过 **218 项节点与 HTTP 回归**，无跳过，并完成文本提示词 → 384×384 PNG 的实际绘图与双引擎释放。视觉、分镜批量及取消/重载实机复测待本机资源空闲后完成。升级可复用现有主模型、MTP 和视觉权重，无需重新下载。
+
+Python 3.10+；此前以运行包 0.1.39-t8.14 完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 128GB RAM 的三类实际绘图验收。Windows 整合包需要 Windows 10 1903+/11 x64、AVX2 CPU、兼容显卡驱动，IQ3_S 建议 96GB 以上 RAM。默认同卡门槛为 12GiB 空闲显存、60GiB 空闲 RAM；其他后台进程仍会占用资源。AMD 文本以 Strata 上游支持列表为准，Windows AMD 视觉尚不支持，AMD 档案使用 `vision:no`。
 
 节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
 
