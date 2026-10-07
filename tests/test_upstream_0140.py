@@ -1,4 +1,4 @@
-"""Protocol 1 compatibility when Strata-T8 adopts upstream 0.1.40.1.
+"""Protocol 1 compatibility when Strata-T8 adopts upstream 0.1.40.1 and 0.1.40.2.
 
 These exercise real loopback HTTP and the public node entry points, without
 downloading a model or constructing a native GPU encoder.
@@ -19,10 +19,10 @@ class ManagedUpstreamCompatibility(unittest.TestCase):
     def manager(self):
         return fixture.OwnedProcesses.prepared_manager(self)
 
-    def write_metadata(self, manager, version):
+    def write_metadata(self, manager, version, tag='v0.1.40.1', engine='0.1.40'):
         (manager.root/'meta.json').write_text(json.dumps({
             'version': version, 'protocol_version': 1,
-            'upstream_release_tag': 'v0.1.40.1', 'engine_version': '0.1.40',
+            'upstream_release_tag': tag, 'engine_version': engine,
         }), encoding='utf-8')
 
     def test_hotfix_source_tag_does_not_require_a_four_part_portable_version(self):
@@ -31,6 +31,14 @@ class ManagedUpstreamCompatibility(unittest.TestCase):
         self.assertEqual(manager.runtime_version(), '0.1.40-t8.1')
         # A source tag is metadata, not a replacement for the portable contract.
         self.write_metadata(manager, '0.1.40.1-t8.1')
+        with self.assertRaisesRegex(core.StrataError, 'metadata'):
+            manager.runtime_version()
+
+    def test_four_part_native_hotfix_preserves_protocol_and_upgrade_identity(self):
+        manager = self.manager()
+        self.write_metadata(manager, '0.1.40-t8.2', tag='v0.1.40.2', engine='0.1.40.2')
+        self.assertEqual(manager.runtime_version(), '0.1.40-t8.2')
+        self.write_metadata(manager, '0.1.40.2-t8.2', tag='v0.1.40.2', engine='0.1.40.2')
         with self.assertRaisesRegex(core.StrataError, 'metadata'):
             manager.runtime_version()
 

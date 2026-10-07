@@ -81,7 +81,7 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 ## 环境与更新
 
-节点 **1.0.6** 兼容 Strata-T8 **0.1.40-t8.1**（上游 [v0.1.40.1](https://github.com/Niko1221/Strata/releases/tag/v0.1.40.1)），继续使用协议 1，最低运行包版本为 `0.1.39-t8.14`。新版已通过 **218 项节点与 HTTP 回归**，无跳过；文本提示词、图片反推、结构化分镜及顺序批量均完成实际 384×384 绘图，确认语言和视觉进程退出后再采样。运行包另通过加载/预填充/生成取消、恢复、卸载及新进程重载实测；[验证范围与测量条件](https://github.com/T8mars/Strata-T8/blob/main/docs/VALIDATION-UPSTREAM-0140-T8.md)。升级可复用现有主模型、MTP 和视觉权重，无需重新下载。
+节点 **1.0.6** 兼容 Strata-T8 **0.1.40-t8.2**（上游 [v0.1.40.2](https://github.com/Niko1221/Strata/releases/tag/v0.1.40.2)，原生引擎 `0.1.40.2`），继续使用协议 1，最低运行包版本为 `0.1.39-t8.14`。**219 项节点与 HTTP 回归**通过，无跳过；文本提示词、图片反推、结构化分镜及顺序批量完成实际 384×384 绘图，确认语言和视觉进程退出后再采样。[验证范围与测量条件](https://github.com/T8mars/Strata-T8/blob/main/docs/VALIDATION-UPSTREAM-01402-T8.md)。本次节点只更新兼容测试与文档，版本仍为 1.0.6；主模型、MTP 和视觉权重无需重新下载。
 
 Python 3.10+；此前以运行包 0.1.39-t8.14 完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 128GB RAM 的三类实际绘图验收。Windows 整合包需要 Windows 10 1903+/11 x64、AVX2 CPU、兼容显卡驱动，IQ3_S 建议 96GB 以上 RAM。默认同卡门槛为 12GiB 空闲显存、60GiB 空闲 RAM；其他后台进程仍会占用资源。AMD 文本以 Strata 上游支持列表为准，Windows AMD 视觉尚不支持，AMD 档案使用 `vision:no`。
 
