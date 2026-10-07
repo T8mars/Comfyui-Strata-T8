@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tomllib
 import zipfile
@@ -14,7 +15,14 @@ SHIPPING = {'__init__.py', 'core.py', 'nodes.py', 'panel.py', 'README.md', 'LICE
 def main():
     meta = tomllib.loads((ROOT/'pyproject.toml').read_text(encoding='utf-8'))
     version = meta['project']['version']
-    assert json.loads((ROOT/'meta.json').read_text())['version'] == version
+    source = json.loads((ROOT/'meta.json').read_text(encoding='utf-8'))
+    shipping = json.loads((ROOT/'version.json').read_text(encoding='utf-8'))
+    if source['version'] != version or shipping['version'] != version:
+        raise ValueError('Node version differs between pyproject.toml, meta.json and version.json')
+    if (type(shipping.get('protocol_version')) is not int or shipping['protocol_version'] != 1
+            or not isinstance(shipping.get('runtime_min_version'), str)
+            or not re.fullmatch(r'([0-9]{1,8})\.([0-9]{1,8})\.([0-9]{1,8})-t8\.([0-9]{1,8})', shipping['runtime_min_version'])):
+        raise ValueError('Invalid shipping runtime compatibility metadata')
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf-8').split('\0')
     names = sorted(name for name in paths if name and (name in SHIPPING or name.startswith(('web/', 'examples/'))))
     if not SHIPPING.issubset(names):

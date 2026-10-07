@@ -506,7 +506,8 @@ class Managed:
         """Managed preparation uses the portable contract; external connections need no metadata."""
         try:
             metadata = json_loads((self.root/'meta.json').read_text(encoding='utf-8'))
-            minimum = json_loads(Path(__file__).with_name('meta.json').read_text(encoding='utf-8'))['runtime_min_version']
+            # version.json ships in both Release ZIPs and Registry installs; meta.json does not.
+            minimum = json_loads(Path(__file__).with_name('version.json').read_text(encoding='utf-8'))['runtime_min_version']
             version = metadata['version']
             if type(metadata['protocol_version']) is not int or metadata['protocol_version'] != 1:
                 raise ValueError()

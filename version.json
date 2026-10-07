@@ -1,6 +1,7 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "protocol_version": 1,
+  "runtime_min_version": "0.1.39-t8.14",
   "repository": "T8mars/Comfyui-Strata-T8",
   "models_included": false
 }

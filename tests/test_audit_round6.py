@@ -67,7 +67,7 @@ class ManagedMetadataPreflight(unittest.TestCase):
 
     def manager(self):
         manager = fixture.OwnedProcesses.prepared_manager(self)
-        current = json.loads((fixture.NODE_ROOT/'meta.json').read_text(encoding='utf-8'))['runtime_min_version']
+        current = json.loads((fixture.NODE_ROOT/'version.json').read_text(encoding='utf-8'))['runtime_min_version']
         (manager.root/'meta.json').write_text(json.dumps({'version':current,'protocol_version':1}), encoding='utf-8')
         return manager
 
@@ -206,7 +206,7 @@ class LifecyclePreflightAndPostconditions(unittest.TestCase):
 
     def test_a_new_managed_profile_with_vision_off_never_reaches_native_preparation_or_handoff(self):
         manager=fixture.OwnedProcesses.prepared_manager(self)
-        minimum=json.loads((fixture.NODE_ROOT/'meta.json').read_text(encoding='utf-8'))['runtime_min_version']
+        minimum=json.loads((fixture.NODE_ROOT/'version.json').read_text(encoding='utf-8'))['runtime_min_version']
         (manager.root/'meta.json').write_text(json.dumps({'version':minimum,'protocol_version':1}),encoding='utf-8')
         core.save_profile('test',dict(manager.profile,mode='managed',vision='no',same_gpu=True))
         self.assertFalse(manager.state_path.exists())

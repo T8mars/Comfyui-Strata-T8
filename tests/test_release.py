@@ -23,6 +23,7 @@ class ReleaseTests(unittest.TestCase):
                     (root/shipping).write_text('public shipping file')
                 (root/'pyproject.toml').write_text((ROOT/'pyproject.toml').read_text())
                 (root/'meta.json').write_text((ROOT/'meta.json').read_text())
+                (root/'version.json').write_text((ROOT/'version.json').read_text())
                 weight = root/name
                 weight.parent.mkdir(parents=True, exist_ok=True)
                 weight.write_bytes(b'accidental tensor fixture')
@@ -46,6 +47,7 @@ class ReleaseTests(unittest.TestCase):
                 (root/name).write_text('public shipping file')
             (root/'pyproject.toml').write_text((ROOT/'pyproject.toml').read_text())
             (root/'meta.json').write_text((ROOT/'meta.json').read_text())
+            (root/'version.json').write_text((ROOT/'version.json').read_text())
             (root/'.env').write_text('private-key')
             (root/'profiles').mkdir()
             (root/'profiles/private.json').write_text('private-key')

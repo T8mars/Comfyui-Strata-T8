@@ -81,13 +81,15 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 ## 环境与更新
 
-节点 **1.0.6** 兼容 Strata-T8 **0.1.40-t8.2**（上游 [v0.1.40.2](https://github.com/Niko1221/Strata/releases/tag/v0.1.40.2)，原生引擎 `0.1.40.2`），继续使用协议 1，最低运行包版本为 `0.1.39-t8.14`。**219 项节点与 HTTP 回归**通过，无跳过；文本提示词、图片反推、结构化分镜及顺序批量完成实际 384×384 绘图，确认语言和视觉进程退出后再采样。[验证范围与测量条件](https://github.com/T8mars/Strata-T8/blob/main/docs/VALIDATION-UPSTREAM-01402-T8.md)。本次节点只更新兼容测试与文档，版本仍为 1.0.6；主模型、MTP 和视觉权重无需重新下载。
+节点 **1.0.7** 继续使用协议 1，最低运行包版本为 `0.1.39-t8.14`。修复 Release ZIP 和 Registry 安装后托管服务无法读取最低运行版本的问题；兼容信息集中在随包提供的 `version.json`，打包前核对三个版本文件与运行包兼容字段。**239 项节点与 HTTP 回归**通过，无跳过；[第八组 20 轮记录](docs/AUDIT-20-ROUND8-NODES.md)区分实际 HTTP、安装产物和资源替身验证。主模型、MTP 和视觉权重无需重新下载。
+
+此前节点 1.0.6 与 Strata-T8 **0.1.40-t8.2**（上游 [v0.1.40.2](https://github.com/Niko1221/Strata/releases/tag/v0.1.40.2)，原生引擎 `0.1.40.2`）的文本提示词、图片反推、结构化分镜及顺序批量完成实际 384×384 绘图，确认语言和视觉进程退出后再采样。[验证范围与测量条件](https://github.com/T8mars/Strata-T8/blob/main/docs/VALIDATION-UPSTREAM-01402-T8.md)。
 
 Python 3.10+；此前以运行包 0.1.39-t8.14 完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 128GB RAM 的三类实际绘图验收。Windows 整合包需要 Windows 10 1903+/11 x64、AVX2 CPU、兼容显卡驱动，IQ3_S 建议 96GB 以上 RAM。默认同卡门槛为 12GiB 空闲显存、60GiB 空闲 RAM；其他后台进程仍会占用资源。AMD 文本以 Strata 上游支持列表为准，Windows AMD 视觉尚不支持，AMD 档案使用 `vision:no`。
 
 节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
 
-[第七组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND7-NODES.md)；节点支持当前 ComfyUI V3 API，并保留 V1 适配。
+[第七组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND7-NODES.md)；[第八组 20 轮检查与回归记录](docs/AUDIT-20-ROUND8-NODES.md)。节点支持当前 ComfyUI V3 API，并保留 V1 适配。
 
 ## 来源与致谢
 
