@@ -56,13 +56,15 @@ Structured 和 Vision 的非空 JSON Schema 必须显式声明根 `type:object`�
 - storyboard-to-images.api.json：两镜头分镜 → Batch → 原生 STRING 列表 → 两次采样。
 - video-analysis.api.json：官方 Load Video → 有界 CPU 采样 → 按时间轴分析报告。视频文件放入 ComfyUI/input。
 
-视频分析默认 `frames` 模式，每段最多 8 帧，所有片段和总结在同一服务租约中执行，只在整个流程结束后释放。`native` 必须由服务声明视频 contract 1，需要偶数帧。IMAGE + fps 时间为估算，显式 timestamps_json 应严格递增、长度与原帧批次一致。
+视频分析默认 `frames` 模式，每段最多 8 帧，所有片段和总结在同一服务租约中执行，只在整个流程结束后释放。`native` 必须由服务声明视频 contract 1，支持 1–64 个实际采样帧，每段 2–16 帧；服务内部复制奇数段的末帧完成配对，不增加证据帧或虚构时间。单帧不能证明运动方向。反推视频生成提示词选择 `task:prompt`，`report` 输出为英文提示词，完整分析和限制仍在 `analysis_json`。IMAGE + fps 时间为估算，显式 timestamps_json 应严格递增、长度与原帧批次一致。
 
-VIDEO 直接解码原始文件并保留 PTS，按显示旋转后坐标裁切，时间截取使用公共 getter。支持已审阅的官方 File（旧 file-only 与当前 file/trim/crop 布局）、Components 和当前 List；无公开裁切 getter 时只读取固定字段。未知实现、布局或缺少时长元数据的文件直接报错，改用 IMAGE 输入、导出有完整元数据的视频或更新适配器。单个输入文件/BytesIO 上限256MiB，CPU 解码120秒、拼接总采样180秒，时间窗最多3600秒。start_s/end_s 相对输入 VIDEO，end_s:0 表示输入末尾；长片可选择后续时间窗。
+VIDEO 直接解码原始文件并保留 PTS，按显示旋转后坐标裁切，时间截取按已审阅的官方字段与元数据时长计算。支持已审阅的官方 File（旧 file-only 与当前 file/trim/crop 布局）、Components 和当前 List；无公开裁切 getter 时只读取固定字段。未知实现、布局或缺少时长元数据的文件直接报错，改用 IMAGE 输入、导出有完整元数据的视频或更新适配器。单个输入文件/BytesIO 上限256MiB，CPU 解码120秒、拼接总采样180秒，时间窗最多3600秒。start_s/end_s 相对输入 VIDEO，end_s:0 表示输入末尾；长片可选择后续时间窗。
 
 采样最多64帧，默认589824像素，原始单帧不得超过16Mi像素。分析阶段输出上限4096 tokens，问题最多4KiB、可选转写文字最多8KiB。长报告超出归并预算时明确报错；降低单段输出长度或分时间窗运行。
 
-`analysis_json.analysis` 包含 report、events、shots、prompt、limitations；events 记录 start_s/end_s 和 evidence_frames。时间坐标相对本次选定窗口；manifest 保留输入时间映射。索引或时间超出证据范围时拒绝输出。不同时间窗的报告不能直接视为原片精确镜头边界。可选 transcript 只接文字，不加载ASR权重、也不推断音效或音乐。
+支持后续时间窗：start_s/end_s 的位置上限86400秒，单次窗口仍最多3600秒，fps至少0.001、sampling_fps至少0.01。修正 MKV 非零 PTS 起点的时长、尾部截取与拼接时间轴；透明文件帧和 Components 分离alpha按白背景合成，PQ/HLG HDR文件和非sRGB Components须先转换为SDR/sRGB。不同尺寸采样帧按比例缩小并留白到首帧画布；manifest 的 width/height 对应实际输出，pre_tensor_size与tensor_content_box记录变换。`task:prompt` 最终返回空或纯空白提示词会报错并清理租约，下游不会收到分析报告作为替代提示词。
+
+`analysis_json.analysis` 包含 report、events、shots、prompt、limitations；events 记录 start_s/end_s 和不重复的 evidence_frames。时间坐标相对本次选定窗口；manifest 保留输入时间映射。每次汇总仅能引用该组输入证据帧，事件时间须位于所引用帧的时间范围内，越界时拒绝输出。归并预算包含问题、覆盖信息及帧时间元数据。不同时间窗的报告不能直接视为原片精确镜头边界。可选 transcript 只接文字，不加载ASR权重、也不推断音效或音乐。
 
 Strata 输出文字，绘图由下游模型完成；抽帧图片分析不称为原生视频理解。
 
@@ -76,7 +78,7 @@ Strata 输出文字，绘图由下游模型完成；抽帧图片分析不称为�
 
 ## 版本与更新
 
-节点 1.1.0 增加 Video Sample 与 Video Analyze，协议仍为 1，抽帧模式最低运行包为 0.1.39-t8.14；原生模式需要服务明确声明视频能力。官方 VIDEO 旋转＋裁切＋截取、拼接、Components 与 V3 Schema 已通过 CPU 合成素材验证。
+节点 1.1.1 修复视频时间、证据引用、透明度、汇总输出与重启清理；配套运行包 0.1.42-t8.3，347 项 CPU/HTTP 回归通过。协议仍为 1，抽帧模式最低运行包为 0.1.39-t8.14；原生模式需要服务明确声明视频能力。官方 VIDEO 旋转＋裁切＋截取、拼接、Components 与 V3 Schema 已通过 CPU 素材验证；本版没有新的模型 GPU 或真实长片质量验收。
 
 2026-10-12 在 RTX 4060 Ti 16GB／128GB RAM、SC117 IQ3_S、32K 上下文上验证真实 V3 节点：frames/native 均完成8帧、两个4帧分段和一次汇总，正确识别8秒合成片的颜色变化与圆形移动方向，同流程保持一组进程，最后双进程退出；原有文字、图片及推理中取消清理通过。
 

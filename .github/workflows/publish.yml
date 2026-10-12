@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths: [pyproject.toml]
   workflow_dispatch:
+    inputs:
+      publish_registry:
+        description: Publish this immutable version to Comfy Registry
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -33,6 +38,7 @@ jobs:
             gh release create "$tag" dist/*.zip dist/*.sha256 --target "$GITHUB_SHA" --title "Strata-T8 ComfyUI $version" --notes-file RELEASE-NOTES.md --latest
           fi
       - name: Publish using official Comfy action
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_registry }}
         uses: Comfy-Org/publish-node-action@0eb6cd742945443bee7f79eeddd4f732780029a1
         with:
           skip_checkout: 'true'

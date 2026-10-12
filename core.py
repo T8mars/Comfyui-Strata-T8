@@ -807,8 +807,8 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                 import torch
                 if torch.cuda.memory_allocated(baseline[0]) > baseline[2]+128*1024**2:
                     raise StrataError('ComfyUI background GPU work appeared during the Strata request')
-        try:
-            status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile) if profile.get('same_gpu') else None) if manager else client.request('/v1/status', check=check, timeout=5)
+        def authorize(status):
+            # A restarted server is a new lease: validate every initial gate again.
             service_status(status)
             if profile.get('same_gpu') and status['concurrency']['serving'] != 1:
                 raise StrataError('Same-GPU mode requires parallel=1')
@@ -820,19 +820,17 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                 raise StrataError('Enable the bundled vision encoder in this profile')
             if capability_check is not None:
                 capability_check(status)
+        try:
+            status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile) if profile.get('same_gpu') else None) if manager else client.request('/v1/status', check=check, timeout=5)
+            authorize(status)
             cleanup_required = bool(profile.get('allow_lifecycle'))
             if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
                 if cleanup(client, profile, manager, None):
                     # A confirmed fallback stop invalidates the old HTTP/model identity.
+                    cleanup_required = False
                     status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile))
-                    service_status(status)
-                    if capability_check is not None:
-                        capability_check(status)
-                    if status['activity']['in_flight']:
-                        cleanup_required = False  # Do not unload another active request.
-                        raise StrataError('Strata is busy with another request; retry after it finishes')
-                    if status['concurrency']['serving'] != 1:
-                        raise StrataError('Same-GPU mode requires parallel=1')
+                    authorize(status)
+                    cleanup_required = bool(profile.get('allow_lifecycle'))
             baseline = gpu_handoff(profile) if profile.get('same_gpu') else None
             answers = []
             pending = list(requests)

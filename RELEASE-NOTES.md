@@ -1,3 +1,13 @@
+## Strata-T8 ComfyUI 1.1.1
+
+修复视频分段汇总的证据范围与时间、空反推提示词、混合尺寸和透明帧；修正 MKV 时间偏移、尾部截取及列表拼接。服务备用重启后重新校验协议、并发、忙碌、视觉和原生能力，拒绝时不沿用旧清理权限。
+
+官方 VIDEO 的文件、BytesIO、拼接与 Components 输入一致处理。PQ/HLG HDR 文件及非 sRGB Components 需先转换 SDR/sRGB；不提供自动 HDR tone mapping。支持 1–64 个真实采样帧与原生末帧配对，保留原始证据 ID；字幕或转写可作为文字输入。
+
+**347 项 CPU/HTTP 回归通过**，实际官方 VIDEO / torch CPU 验证透明度、时间与 SDR 基线一致；本版未重跑模型 GPU 或真实长片质量验收。12 个节点 ID、V3/V1 和协议 1 保持兼容，配套 Strata-T8 **0.1.42-t8.3**；现有模型及视觉权重可继续使用。
+
+节点 ZIP 不含 Python、引擎或权重，安装及模型路径见 README。本次发布 GitHub Release；Registry 保留官方工作流，手动选择后才发布。
+
 ## Strata-T8 ComfyUI 1.1.0
 
 新增 Video Sample 和 Video Analyze，支持官方 VIDEO、IMAGE 批次及显式时间戳。提供概述、时间轴、分镜观察、问答和提示词反推，输出报告、JSON、证据图片和采样覆盖；支持分段与有界汇总，在同一模型加载会话完成。原生双帧模式须由 Strata 服务明确协商能力，使用 Strata-T8 **0.1.42-t8.2** 或更新版本。

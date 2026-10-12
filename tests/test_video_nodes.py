@@ -136,7 +136,7 @@ class CPUVideo(unittest.TestCase):
                                                source_duration_s=4., preselected=True, start_s=1., end_s=3.)
         with mock.patch.dict(sys.modules, {module_name: types.SimpleNamespace(VideoFromFile=file_cls)}), \
              mock.patch.object(video.shared(), 'sample_video', return_value=sampled) as decoder, \
-             mock.patch.object(video, 'metadata_guard'):
+             mock.patch.object(video, 'metadata_guard', return_value=3.):
             _, text = nodes.StrataVideoSample().run(video=obj)
         self.assertEqual(decoder.call_args.args, (source,))
         self.assertEqual(decoder.call_args.kwargs['crop'], (0, 4, 4, 4))
@@ -147,7 +147,7 @@ class CPUVideo(unittest.TestCase):
         self.assertEqual([f['original_media_timestamp_s'] for f in manifest['frames']], [1., 2.])
 
     def test_unknown_duration_rejects_without_decoding(self):
-        stream = types.SimpleNamespace(frames=0, average_rate=24)
+        stream = types.SimpleNamespace(duration=None, frames=0, average_rate=24)
         container = mock.MagicMock()
         container.duration = None
         container.streams.video = [stream]

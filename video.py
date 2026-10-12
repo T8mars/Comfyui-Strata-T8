@@ -20,10 +20,15 @@ def shared():
 
 
 def number(value, name, low=0, high=MAX_DURATION, *, positive=False):
-    if (isinstance(value, bool) or not isinstance(value, (int, float))
-            or not math.isfinite(value) or not low <= value <= high or positive and value <= low):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise core.StrataError(f'Invalid video {name}')
-    return float(value)
+    try:
+        value = float(value)
+    except OverflowError:
+        raise core.StrataError(f'Invalid video {name}') from None
+    if not math.isfinite(value) or not low <= value <= high or positive and value <= low:
+        raise core.StrataError(f'Invalid video {name}')
+    return value
 
 
 def timestamps(text, count, fps):
@@ -38,13 +43,24 @@ def timestamps(text, count, fps):
     return values
 
 
-def pil_frame(tensor, max_pixels):
+def pil_frame(tensor, max_pixels, alpha=None):
     import numpy as np
     from PIL import Image
     core.interrupted()
     array = tensor.detach().to('cpu').float().numpy()
     if not np.isfinite(array).all():
         raise core.StrataError('IMAGE contains non-finite pixel values')
+    if alpha is not None:
+        core.interrupted()
+        mask = alpha.detach().to('cpu').float().numpy()
+        if mask.ndim == 3 and mask.shape[-1] == 1:
+            mask = mask[..., 0]
+        if mask.shape != array.shape[:2] or not np.isfinite(mask).all():
+            raise core.StrataError('VIDEO alpha must contain finite values matching its image dimensions')
+        mask = np.clip(mask, 0, 1)
+        if array.shape[-1] == 4:
+            mask = mask * np.clip(array[..., 3], 0, 1)
+        array = np.clip(array[..., :3], 0, 1) * mask[..., None] + (1 - mask[..., None])
     image = Image.fromarray((np.clip(array, 0, 1) * 255).round().astype(np.uint8))
     if image.mode == 'RGBA':
         rgb = Image.new('RGB', image.size, 'white')
@@ -66,16 +82,21 @@ def pil_frame(tensor, max_pixels):
 
 
 def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
-                  sampling_fps=1, max_frames=64, max_pixels=589824):
+                  sampling_fps=1, max_frames=64, max_pixels=589824, alpha=None):
     if (not hasattr(images, 'shape') or len(images.shape) != 4 or images.shape[-1] not in (3, 4)
             or not 1 <= images.shape[0] <= 180000 or images.shape[1] < 1 or images.shape[2] < 1
             or images.shape[1] * images.shape[2] > 16 * 1048576):
         raise core.StrataError('Video IMAGE must be a bounded [frames, height, width, RGB/RGBA] tensor')
+    if alpha is not None and (not hasattr(alpha, 'shape')
+            or tuple(alpha.shape) not in (tuple(images.shape[:3]), (*images.shape[:3], 1))):
+        raise core.StrataError('VIDEO alpha must match its image frame count and dimensions')
     values = timestamps(timestamps_json, images.shape[0], fps)
     source_duration = values[-1] + 1 / fps
+    if not math.isfinite(source_duration):
+        raise core.StrataError('Video source duration must be finite; supply a usable fps')
     stop = source_duration if end_s is None else min(end_s, source_duration)
-    if stop <= start_s:
-        raise core.StrataError('Video time range contains no frames')
+    if stop <= start_s or stop - start_s > MAX_DURATION:
+        raise core.StrataError('Select a nonempty IMAGE window of at most 3600 seconds')
     candidates = [i for i, t in enumerate(values) if start_s <= t < stop]
     if not candidates:
         raise core.StrataError('Video time range contains no frames')
@@ -87,7 +108,8 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
             selected.append(index)
     if not selected:
         raise core.StrataError('Video time range contains no frames')
-    pictures = [pil_frame(images[i], max_pixels) for i in selected]
+    pictures = [pil_frame(images[i], max_pixels, alpha[i]) if alpha is not None else pil_frame(images[i], max_pixels)
+                for i in selected]
     result = shared().sample_images(pictures, fps=fps, timestamps=[values[i] for i in selected],
                                    start_s=start_s, end_s=stop, sampling_fps=sampling_fps,
                                    max_frames=max_frames, max_pixels=max_pixels,
@@ -97,6 +119,8 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
     result.manifest.setdefault('source', {}).update({'timestamp_basis': 'provided' if timestamps_json.strip() else 'estimated_cfr',
                                                     'input_frame_count': int(images.shape[0]),
                                                     'duration_s': source_duration})
+    if alpha is not None:
+        result.manifest['source']['alpha_compositing'] = 'white'
     result.manifest.setdefault('coverage', {}).update({'requested_start_s': start_s, 'requested_end_s': stop})
     for frame, index in zip(result.manifest['frames'], selected):
         frame['input_frame_index'] = index
@@ -116,11 +140,12 @@ def official_type(video):
 
 
 def file_source(video):
-    """Read the audited official crop state; all other state uses public getters.
+    """Read the audited official file/trim/crop state without materializing VIDEO.
 
     The abstract VIDEO API has no crop getter. Both recognized layouts are exact:
-    old file-only objects, or the current file/trim/crop object. Unknown layouts
-    fail before decoding instead of guessing or calling unbounded get_components.
+    old file-only objects, or the current file/trim/crop object. Metadata supplies
+    the raw duration and the audited state supplies trim/crop. Unknown layouts
+    fail before decoding instead of calling unbounded get_components.
     """
     state = vars(video)
     old = {'_VideoFromFile__file'}
@@ -131,25 +156,28 @@ def file_source(video):
     if crop is not None and (not isinstance(crop, tuple) or len(crop) != 4
             or any(type(value) is not int for value in crop) or min(crop[:2]) < 0 or min(crop[2:]) < 1):
         raise core.StrataError('Unsupported official VIDEO crop layout')
-    source = video.get_stream_source()
-    if isinstance(source, (str, Path)):
-        if '://' in str(source) or not Path(source).is_file():
-            raise core.StrataError('VIDEO source must be a local regular file')
-        size = Path(source).stat().st_size
-    elif isinstance(source, io.BytesIO):
-        size = source.getbuffer().nbytes
-    else:
-        raise core.StrataError('VIDEO source must be a bounded local file or BytesIO')
+    try:
+        source = video.get_stream_source()
+        if isinstance(source, (str, Path)):
+            if '://' in str(source) or not Path(source).is_file():
+                raise core.StrataError('VIDEO source must be a local regular file')
+            size = Path(source).stat().st_size
+        elif isinstance(source, io.BytesIO):
+            size = source.getbuffer().nbytes
+        else:
+            raise core.StrataError('VIDEO source must be a bounded local file or BytesIO')
+    except (OSError, ValueError):
+        raise core.StrataError('VIDEO source is unavailable or closed; reload the local video') from None
     if size > MAX_INPUT_BYTES:
         raise core.StrataError('VIDEO source exceeds 256 MiB; select a smaller source file')
     return state, crop, source
 
 
 def metadata_guard(source):
-    """Ensure official duration getters take their metadata-only branches.
+    """Return bounded track duration without full-decode duration getters.
 
-    Without duration/frame metadata, their documented fallback counts an entire
-    decoded stream. Reject that branch before a getter can open or decode it.
+    The official fallback counts an entire decoded stream when metadata is
+    absent. Reject that branch and correct container PTS offsets before trim.
     """
     import av
     core.interrupted()
@@ -160,25 +188,39 @@ def metadata_guard(source):
             stream = next(iter(container.streams.video), None)
             if stream is None:
                 raise core.StrataError('VIDEO source has no video stream')
-            if container.duration is not None:
-                number(float(container.duration / av.time_base), 'source duration', high=86400, positive=True)
-            elif stream.frames and stream.average_rate:
-                number(float(stream.frames / stream.average_rate), 'source duration', high=86400, positive=True)
-            else:
+            try:
+                shared().video_color_precheck(stream)
+            except ValueError as error:
+                raise core.StrataError(str(error)) from None
+            duration = shared().video_duration(container, stream)
+            if duration is None and stream.frames and stream.average_rate:
+                duration = float(stream.frames / stream.average_rate)
+            if duration is None:
                 raise core.StrataError('VIDEO duration metadata is missing; export a bounded video file or use IMAGE with timestamps')
+            duration = number(duration, 'source duration', high=86400, positive=True)
     except (av.FFmpegError, OSError) as error:
         raise core.StrataError(f'VIDEO metadata could not be read: {error}') from None
     core.interrupted()
+    return duration
+
+
+def file_timing(state, raw_duration):
+    """Apply the official trim rules to the bounded, corrected video-track duration."""
+    raw_duration = number(raw_duration, 'source duration', high=86400, positive=True)
+    start = number(state.get('_VideoFromFile__start_time', 0), 'source trim', low=-86400, high=86400)
+    requested = number(state.get('_VideoFromFile__duration', 0), 'source trim duration', high=86400)
+    original_start = max(raw_duration + start, 0.) if start < 0 else start
+    remaining = raw_duration - original_start
+    duration = min(requested, remaining) if requested else remaining
+    return original_start, number(duration, 'duration', high=86400, positive=True)
 
 
 def file_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels, cancel):
     state, crop, source = file_source(video)
-    metadata_guard(source)
-    duration = number(video.get_duration(), 'duration', high=86400, positive=True)
+    original_start, duration = file_timing(state, metadata_guard(source))
     stop = duration if end_s is None else min(duration, end_s)
     if stop <= start_s or stop - start_s > MAX_DURATION:
         raise core.StrataError('Select a nonempty VIDEO window of at most 3600 seconds')
-    original_start = number(video.get_active_trim_window()[0], 'source trim', high=86400) if len(state) == 4 else 0
     result = shared().sample_video(source, start_s=original_start + start_s,
                                    end_s=original_start + stop, sampling_fps=sampling_fps,
                                    max_frames=max_frames, max_pixels=max_pixels, max_duration_s=MAX_DURATION,
@@ -199,12 +241,21 @@ def list_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels)
     if (set(state) != {'videos', 'complete_audio', '_VideoFromList__buffer'} or not isinstance(video.videos, list)
             or not 1 <= len(video.videos) <= 64):
         raise core.StrataError('Unsupported accumulated VIDEO layout')
+    deadline = time.monotonic() + 180
+    def check():
+        core.interrupted()
+        if time.monotonic() >= deadline:
+            raise core.StrataError('Accumulated VIDEO sampling exceeded its CPU time limit')
+    durations = []
     for item in video.videos:
+        check()
         if official_type(item) != 'VideoFromFile':
             raise core.StrataError('Accumulated VIDEO must contain bounded official file videos')
-        _, _, source = file_source(item)  # Check bounds before official metadata getters open anything.
-        metadata_guard(source)
-    durations = [number(item.get_duration(), 'component duration', high=86400, positive=True) for item in video.videos]
+        item_state, _, source = file_source(item)
+        raw_duration = metadata_guard(source)
+        check()
+        durations.append(file_timing(item_state, raw_duration)[1])
+        check()
     duration = sum(durations)
     stop = duration if end_s is None else min(end_s, duration)
     if stop <= start_s or stop - start_s > MAX_DURATION:
@@ -212,11 +263,7 @@ def list_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels)
     targets = shared().sampling_schedule(start_s, stop, sampling_fps, max_frames)
     step = targets[1] - targets[0] if len(targets) > 1 else max(1 / sampling_fps, stop - start_s)
     pictures, times, details = [], [], []
-    offset, deadline = 0., time.monotonic() + 180
-    def check():
-        core.interrupted()
-        if time.monotonic() >= deadline:
-            raise core.StrataError('Accumulated VIDEO sampling exceeded its CPU time limit')
+    offset = 0.
     for component_index, (component, component_duration) in enumerate(zip(video.videos, durations)):
         check()
         component_targets = [target - offset for target in targets if offset <= target < offset + component_duration]
@@ -245,6 +292,8 @@ def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s
                  sampling_fps=1, max_frames=64, max_pixels=589824):
     fps = number(fps, 'fps', high=240, positive=True)
     sampling_fps = number(sampling_fps, 'sampling_fps', high=30, positive=True)
+    if fps < .001 or sampling_fps < .01:
+        raise core.StrataError('Video fps must be at least 0.001 and sampling_fps at least 0.01')
     if not isinstance(timestamps_json, str):
         raise core.StrataError('Video timestamps must be JSON text')
     core.text_unicode(timestamps_json)
@@ -271,9 +320,19 @@ def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s
                          {'_VideoFromComponents__components', '_VideoFromComponents__bit_depth', '_VideoFromComponents__color_space'}):
             raise core.StrataError('Unsupported official VIDEO components state layout')
         components = video.get_components()  # Already existing tensors; performs no full-video decode.
-        component_fps = number(float(components.frame_rate), 'component fps', high=240, positive=True)
+        if '_VideoFromComponents__color_space' in state and video.get_color_space() != 'sRGB':
+            raise core.StrataError('Unsupported VIDEO color space; convert component images to sRGB before analysis')
+        try:
+            if isinstance(components.frame_rate, bool):
+                raise ValueError('Boolean component fps')
+            component_fps = number(float(components.frame_rate), 'component fps', high=240, positive=True)
+        except (TypeError, ValueError, OverflowError):
+            raise core.StrataError('Invalid video component fps') from None
+        if component_fps < .001:
+            raise core.StrataError('Video component fps must be at least 0.001')
         return sample_tensor(components.images, fps=component_fps, start_s=start_s,
-                             end_s=end_s, sampling_fps=sampling_fps, max_frames=max_frames, max_pixels=max_pixels)
+                             end_s=end_s, sampling_fps=sampling_fps, max_frames=max_frames, max_pixels=max_pixels,
+                             alpha=getattr(components, 'alpha', None))
     if name == 'VideoFromList':
         return list_adapter(video, start_s=start_s, end_s=end_s, sampling_fps=sampling_fps,
                             max_frames=max_frames, max_pixels=max_pixels)
@@ -284,12 +343,27 @@ def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s
 def tensor_result(sampled):
     import numpy as np
     import torch
+    from PIL import Image
     if not sampled.frames:
         raise core.StrataError('Video produced no decodable frames')
     size = sampled.frames[0].image.size
-    pictures = [frame.image.resize(size) if frame.image.size != size else frame.image for frame in sampled.frames]
-    # Samples were capped and downscaled before this CPU-only stack.
-    tensors = [torch.from_numpy(np.asarray(image, dtype=np.float32).copy() / 255) for image in pictures]
+    tensors = []
+    for frame, metadata in zip(sampled.frames, sampled.manifest['frames']):
+        core.interrupted()
+        image = frame.image
+        if image.size != size:
+            original_size = image.size
+            image = image.copy()
+            image.thumbnail(size, Image.Resampling.LANCZOS)
+            x, y = (size[0] - image.width) // 2, (size[1] - image.height) // 2
+            canvas = Image.new('RGB', size, 'white')
+            canvas.paste(image, (x, y))
+            metadata.update(pre_tensor_size=list(original_size), tensor_content_box=[x, y, image.width, image.height],
+                            width=size[0], height=size[1])
+            image = canvas
+            sampled.manifest.setdefault('source', {})['tensor_normalization'] = 'aspect_preserving_white_canvas'
+        # Samples were capped and downscaled before this CPU-only stack.
+        tensors.append(torch.from_numpy(np.asarray(image, dtype=np.float32).copy() / 255))
     core.interrupted()
     return torch.stack(tensors), json.dumps(sampled.manifest, ensure_ascii=False, allow_nan=False)
 

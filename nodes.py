@@ -46,7 +46,7 @@ VIDEO_SCHEMA = {
             'required': ['start_s', 'end_s', 'description', 'evidence_frames'],
             'properties': {'start_s': {'type': 'number', 'minimum': 0}, 'end_s': {'type': 'number', 'minimum': 0},
                            'description': {'type': 'string', 'maxLength': 1000},
-                           'evidence_frames': {'type': 'array', 'minItems': 1, 'maxItems': 64,
+                           'evidence_frames': {'type': 'array', 'minItems': 1, 'maxItems': 64, 'uniqueItems': True,
                                                'items': {'type': 'integer', 'minimum': 0, 'maximum': 63}}}}},
         'shots': {'type': 'array', 'maxItems': 64, 'items': {'type': 'string', 'maxLength': 1000}}}}
 
@@ -487,7 +487,7 @@ class StrataVideoSample(Base):
 
     def run(self, video=None, images=None, fps=24, timestamps_json='', start_s=0, end_s=0,
             sampling_fps=1, max_frames=64, max_pixels=589824):
-        video_tools.number(end_s, 'end_s')
+        video_tools.number(end_s, 'end_s', high=86400)
         result = video_tools.sample_input(video, images, fps=fps, timestamps_json=timestamps_json,
                                          start_s=start_s, end_s=None if end_s == 0 else end_s,
                                          sampling_fps=sampling_fps, max_frames=max_frames, max_pixels=max_pixels)
@@ -520,8 +520,6 @@ class StrataVideoAnalyze(Base):
             raise core.StrataError('Video mode must be frames or native')
         if type(frames_per_segment) is not int or not 2 <= frames_per_segment <= (8 if mode == 'frames' else 16):
             raise core.StrataError('Use 2–8 frames per segment in frames mode, or 2–16 in native mode')
-        if mode == 'native' and frames_per_segment % 2:
-            raise core.StrataError('Native video segments require an even frame count')
         if not isinstance(transcript, str) or len(transcript.encode('utf-8', 'surrogatepass')) > 8192:
             raise core.StrataError('Optional transcript must be text of at most 8 KiB')
         if not isinstance(question, str) or len(question.encode('utf-8', 'surrogatepass')) > 4096:
@@ -532,8 +530,6 @@ class StrataVideoAnalyze(Base):
             raise core.StrataError('Video output is limited to 4096 tokens per stage')
         if not hasattr(frames, 'shape') or len(frames.shape) != 4 or not 1 <= frames.shape[0] <= 64:
             raise core.StrataError('Video analysis requires 1–64 sampled frames')
-        if mode == 'native' and (frames.shape[0] < 2 or frames.shape[0] % 2):
-            raise core.StrataError('Native video requires at least two frames and an even total count')
         try:
             raw_manifest = core.json_loads(manifest_json)
             if not isinstance(raw_manifest, dict) or type(raw_manifest.get('contract_version')) is not int:
@@ -551,6 +547,8 @@ class StrataVideoAnalyze(Base):
             raise core.StrataError('Video max_pixels must be between 65536 and 1048576')
         if frames.shape[1] * frames.shape[2] * frames.shape[0] > 64 * 1048576:
             raise core.StrataError('Sampled video tensor exceeds the CPU conversion budget')
+        if any((frame['width'], frame['height']) != (frames.shape[2], frames.shape[1]) for frame in manifest['frames']):
+            raise core.StrataError('Video manifest dimensions do not match the sampled IMAGE tensor')
         encoded = core.encode_images(frames, max_images=64, max_pixels=max_pixels)
         core.interrupted()
         evidence = manifest['frames']
@@ -558,7 +556,9 @@ class StrataVideoAnalyze(Base):
                        'Use only provided frame IDs and relative timestamps. Never invent unseen motion or audio. '
                        'An optional transcript is user-supplied text, not verified audio. Distinguish observation from inference. '
                        'Return the requested JSON schema. Use empty events/shots/prompt when not needed. '
-                       'Include sampling gaps and uncertainty in limitations. All event times must be within the supplied frame interval.')
+                       'Include sampling gaps and uncertainty in limitations. All event times must be within the interval of their cited evidence frames.')
+        if task == 'prompt':
+            instruction += ' The prompt task requires a nonempty generation prompt in the final answer; an analysis report cannot replace it.'
         static = []
         spans = []
         for offset in range(0, len(encoded), frames_per_segment):
@@ -579,56 +579,70 @@ class StrataVideoAnalyze(Base):
         initial = []
         final = []
         first_stage = True
-        allowed_ids = {frame['index'] for frame in evidence}
-        min_time, max_time = evidence[0]['timestamp_s'], evidence[-1]['timestamp_s']
+        stage_scopes = [{frame['index']: frame for frame in span} for span in spans]
 
-        def parse_answer(answer, ids, start, end):
+        def parse_answer(answer, scope):
             value = validated(answer[0], VIDEO_SCHEMA)
             for event in value['events']:
-                if (event['start_s'] > event['end_s'] or event['start_s'] < start - 1e-6
-                        or event['end_s'] > end + 1e-6 or any(index not in ids for index in event['evidence_frames'])):
+                ids = event['evidence_frames']
+                if any(index not in scope for index in ids):
+                    raise StructuredOutputError('Video analysis returned an event outside its evidence frames or timestamps')
+                cited_times = [scope[index]['timestamp_s'] for index in ids]
+                if (event['start_s'] > event['end_s'] or event['start_s'] < min(cited_times) - 1e-6
+                        or event['end_s'] > max(cited_times) + 1e-6):
                     raise StructuredOutputError('Video analysis returned an event outside its evidence frames or timestamps')
             return value
 
         def continuation(answers, status):
-            nonlocal first_stage
+            nonlocal first_stage, stage_scopes
+            if len(answers) != len(stage_scopes):
+                raise core.StrataError('Video summary answer count does not match its evidence scopes')
+            parsed = [parse_answer(answer, scope) for answer, scope in zip(answers, stage_scopes)]
             if first_stage:
-                parsed = [parse_answer(answer, {frame['index'] for frame in span}, span[0]['timestamp_s'], span[-1]['timestamp_s'])
-                          for answer, span in zip(answers, spans)]
                 initial.extend(parsed)
                 first_stage = False
-            else:
-                parsed = [parse_answer(answer, allowed_ids, min_time, max_time) for answer in answers]
             if len(parsed) == 1:
+                if task == 'prompt' and not parsed[0]['prompt'].strip():
+                    raise StructuredOutputError('Video prompt task returned an empty prompt; no generation prompt is available')
                 final.append(parsed[0])
                 return None
             # A bounded hierarchy fits summaries into the same lease; raw chunk reports stay in the output.
-            groups, group = [], []
-            for value in parsed:
+            def merge_content(values, scope):
+                return json.dumps({'task': task, 'question': question, 'segments': values,
+                                   'evidence_frames': [{'index': index, 'timestamp_s': frame['timestamp_s']}
+                                                       for index, frame in scope.items()],
+                                   'coverage': manifest.get('coverage', {})}, ensure_ascii=False)
+            groups, group, group_scope = [], [], {}
+            for value, scope in zip(parsed, stage_scopes):
                 candidate = group + [value]
-                if group and (len(candidate) > 4 or len(json.dumps(candidate, ensure_ascii=False).encode('utf-8')) > 12000):
-                    groups.append(group)
-                    group = [value]
+                candidate_scope = {**group_scope, **scope}
+                if group and (len(candidate) > 4 or len(merge_content(candidate, candidate_scope).encode('utf-8')) > 12000):
+                    groups.append((group, group_scope))
+                    group, group_scope = [value], dict(scope)
                 else:
                     group = candidate
+                    group_scope.update(scope)
             if group:
-                groups.append(group)
+                groups.append((group, group_scope))
             if len(groups) >= len(parsed):
                 raise core.StrataError('Video summaries exceed the 32K-safe merge budget; reduce per-segment output length')
             requests = []
-            for group in groups:
-                req = request(json.dumps({'task': task, 'question': question, 'segments': group,
-                                          'coverage': manifest.get('coverage', {})}, ensure_ascii=False),
+            for group, scope in groups:
+                text = merge_content(group, scope)
+                if len(text.encode('utf-8')) > 12000:
+                    raise core.StrataError('Video summaries exceed the 32K-safe merge budget; reduce per-segment output length')
+                req = request(text,
                               instruction + ' Merge these segment reports. Preserve evidence IDs and time ranges; do not add new visual facts.', **options)
                 req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'video_summary', 'schema': VIDEO_SCHEMA}}
                 requests.append(req)
+            stage_scopes = [scope for group, scope in groups]
             return requests
 
         answers = core.generate_pipeline(connection, static, continuation, max_followups=32,
                                          capability_check=video_tools.native_capability if mode == 'native' else None)
         result = {'contract_version': 1, 'mode': mode, 'task': task, 'analysis': final[0],
                   'segments': initial, 'source': manifest.get('source', {}), 'coverage': manifest.get('coverage', {})}
-        report = final[0]['prompt'] if task == 'prompt' and final[0]['prompt'] else final[0]['report']
+        report = final[0]['prompt'] if task == 'prompt' else final[0]['report']
         outputs = (report, json.dumps(result, ensure_ascii=False), json.dumps(evidence, ensure_ascii=False),
                    json.dumps(manifest.get('coverage', {}), ensure_ascii=False),
                    json.dumps({'requests': len(answers), 'stages': [core.json_loads(answer[2]) for answer in answers]}, ensure_ascii=False))
