@@ -15,6 +15,23 @@ spec.loader.exec_module(builder)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_tracked_private_roadmap_is_rejected_before_archive_creation(self):
+        for name in ('roadmap.md', 'examples/deep/RoadMap.MD', 'web/ROADMAP.md'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory)
+                for shipping in builder.SHIPPING:
+                    (root/shipping).write_text('public shipping file')
+                for metadata in ('pyproject.toml','meta.json','version.json'):
+                    (root/metadata).write_bytes((ROOT/metadata).read_bytes())
+                private=root/name
+                private.parent.mkdir(parents=True,exist_ok=True)
+                private.write_text('private local plan')
+                tracked='\0'.join([*builder.SHIPPING,name])+'\0'
+                with mock.patch.object(builder,'ROOT',root), mock.patch.object(builder.subprocess,'check_output',return_value=tracked.encode()):
+                    with self.assertRaisesRegex(ValueError,'Private roadmap'):
+                        builder.main()
+                self.assertFalse((root/'dist').exists())
+
     def test_tracked_binary_or_onnx_weights_cannot_enter_public_web_or_examples(self):
         for name in ('web/experts.bin', 'examples/accidental.onnx', 'examples/accidental.pth'):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:

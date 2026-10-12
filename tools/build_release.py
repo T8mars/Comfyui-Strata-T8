@@ -1,7 +1,7 @@
 """Build the independent node ZIP from tracked public shipping paths."""
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tomllib
@@ -25,6 +25,8 @@ def main():
             or not re.fullmatch(r'([0-9]{1,8})\.([0-9]{1,8})\.([0-9]{1,8})-t8\.([0-9]{1,8})', shipping['runtime_min_version'])):
         raise ValueError('Invalid shipping runtime compatibility metadata')
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf-8').split('\0')
+    if any(part.casefold() == 'roadmap.md' for name in paths for part in PurePosixPath(name).parts):
+        raise ValueError('Private roadmap must not be tracked or distributed')
     names = sorted(name for name in paths if name and (name in SHIPPING or name.startswith(('web/', 'examples/'))))
     if not SHIPPING.issubset(names):
         raise ValueError('Missing tracked shipping files')
