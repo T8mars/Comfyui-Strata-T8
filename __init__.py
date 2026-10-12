@@ -26,7 +26,8 @@ else:
                         if isinstance(kind, list):
                             inputs.append(io.Combo.Input(name, options=kind, **options))
                         else:
-                            type_io = {'STRING': io.String, 'INT': io.Int, 'FLOAT': io.Float, 'BOOLEAN': io.Boolean, 'IMAGE': io.Image}.get(kind) or io.Custom(kind)
+                            type_io = {'STRING': io.String, 'INT': io.Int, 'FLOAT': io.Float, 'BOOLEAN': io.Boolean, 'IMAGE': io.Image,
+                                       'VIDEO': getattr(io, 'Video', None)}.get(kind) or io.Custom(kind)
                             inputs.append(type_io.Input(name, **options))
                 output_lists = getattr(legacy, 'OUTPUT_IS_LIST', [False]*len(legacy.RETURN_TYPES))
                 outputs = []

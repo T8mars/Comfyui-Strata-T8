@@ -271,7 +271,7 @@ class Structured(unittest.TestCase):
 
 class Registration(unittest.TestCase):
     def test_legacy_ids_and_list_contracts_match_outputs(self):
-        self.assertEqual(len(nodes.NODE_CLASS_MAPPINGS), 10)
+        self.assertEqual(len(nodes.NODE_CLASS_MAPPINGS), 12)
         for node_id, cls in nodes.NODE_CLASS_MAPPINGS.items():
             self.assertIn(node_id, nodes.NODE_DISPLAY_NAME_MAPPINGS)
             self.assertEqual(len(cls.RETURN_TYPES), len(cls.RETURN_NAMES))

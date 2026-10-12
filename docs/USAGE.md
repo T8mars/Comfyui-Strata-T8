@@ -38,6 +38,8 @@
 | Vision | 1–8 图描述、反推、OCR、问答、主观评价，可选 JSON Schema |
 | Batch / Image Batch | 最多 64 条文字或 8 图，顺序推理、一次载入；逐项索引和用量 |
 | Control | 状态、启动、加载验证、卸载、停止自有服务；可透传文字/图片建立依赖 |
+| Video Sample | 官方 VIDEO 或 IMAGE + fps/时间戳 → CPU 关键帧与采样 manifest |
+| Video Analyze | 分段视觉分析、同租约汇总 → 报告、JSON、证据、覆盖与用量 |
 
 refresh 改变时重新生成，其他相同输入使用 ComfyUI 缓存；Control 每次执行。top_k 范围 1–64，top_p >0；seed 不承诺自适应专家模式下逐字一致。结构化输出是生成后校验，可设 0–2 次修复，格式失败明确报错。
 
@@ -45,13 +47,22 @@ Structured 和 Vision 的非空 JSON Schema 必须显式声明根 `type:object`�
 
 面板“启动/加载/卸载/停止”都进入 ComfyUI 队列；状态查询直接读取。同卡 Control 完成加载验证后释放资源再返回，HTTP 服务继续待命；非同卡可显式保持载入。原生 STRING 列表使下游逐项执行，STRATA_TEXT_LIST 将整批交给 Batch。
 
-## 三个示例
+## 工作流示例
 
 把节点包 examples 中的 API JSON 拖入 ComfyUI，替换 Connection 的配置名称和 CheckpointLoader 的 SD1.5 模型名：
 
 - text-to-image.api.json：提示词助手 → CLIP → KSampler → 保存图像。
 - image-to-image.api.json：图片反推 → CLIP → KSampler；先把附带 strata-vision-fixture.png 复制到 ComfyUI/input。
 - storyboard-to-images.api.json：两镜头分镜 → Batch → 原生 STRING 列表 → 两次采样。
+- video-analysis.api.json：官方 Load Video → 有界 CPU 采样 → 按时间轴分析报告。视频文件放入 ComfyUI/input。
+
+视频分析默认 `frames` 模式，每段最多 8 帧，所有片段和总结在同一服务租约中执行，只在整个流程结束后释放。`native` 必须由服务声明视频 contract 1，需要偶数帧。IMAGE + fps 时间为估算，显式 timestamps_json 应严格递增、长度与原帧批次一致。
+
+VIDEO 直接解码原始文件并保留 PTS，按显示旋转后坐标裁切，时间截取使用公共 getter。支持已审阅的官方 File（旧 file-only 与当前 file/trim/crop 布局）、Components 和当前 List；无公开裁切 getter 时只读取固定字段。未知实现、布局或缺少时长元数据的文件直接报错，改用 IMAGE 输入、导出有完整元数据的视频或更新适配器。单个输入文件/BytesIO 上限256MiB，CPU 解码120秒、拼接总采样180秒，时间窗最多3600秒。start_s/end_s 相对输入 VIDEO，end_s:0 表示输入末尾；长片可选择后续时间窗。
+
+采样最多64帧，默认589824像素，原始单帧不得超过16Mi像素。分析阶段输出上限4096 tokens，问题最多4KiB、可选转写文字最多8KiB。长报告超出归并预算时明确报错；降低单段输出长度或分时间窗运行。
+
+`analysis_json.analysis` 包含 report、events、shots、prompt、limitations；events 记录 start_s/end_s 和 evidence_frames。时间坐标相对本次选定窗口；manifest 保留输入时间映射。索引或时间超出证据范围时拒绝输出。不同时间窗的报告不能直接视为原片精确镜头边界。可选 transcript 只接文字，不加载ASR权重、也不推断音效或音乐。
 
 Strata 输出文字，绘图由下游模型完成；抽帧图片分析不称为原生视频理解。
 
@@ -65,7 +76,11 @@ Strata 输出文字，绘图由下游模型完成；抽帧图片分析不称为�
 
 ## 版本与更新
 
-节点 1.0.6 兼容 Strata-T8 0.1.40-t8.1 同步开发版（上游 v0.1.40.1、引擎 0.1.40），协议仍为 1，最低运行包仍为 0.1.39-t8.14。218 项节点/HTTP 回归通过，无跳过，覆盖停止序列、结构化失败修复、视觉批次卸载及托管升级。新版文本提示词 → 384×384 PNG 实际工作流及双引擎释放通过；视觉、分镜批量、取消与重载实机复测等待空闲资源，未计为通过。已有主模型、MTP 与视觉权重可继续使用，无需重新下载。
+节点 1.1.0 增加 Video Sample 与 Video Analyze，协议仍为 1，抽帧模式最低运行包为 0.1.39-t8.14；原生模式需要服务明确声明视频能力。官方 VIDEO 旋转＋裁切＋截取、拼接、Components 与 V3 Schema 已通过 CPU 合成素材验证。
+
+2026-10-12 在 RTX 4060 Ti 16GB／128GB RAM、SC117 IQ3_S、32K 上下文上验证真实 V3 节点：frames/native 均完成8帧、两个4帧分段和一次汇总，正确识别8秒合成片的颜色变化与圆形移动方向，同流程保持一组进程，最后双进程退出；原有文字、图片及推理中取消清理通过。
+
+真实 ComfyUI 队列完成 native 视频→Extract→下游报告保存及8张采样图输出。同卡模式将官方 ModelPatcher 管理的4MiB CUDA模型卸载回CPU，ComfyUI显存分配归零；Strata最后双进程退出。本轮 external 模式未重测完整扩散绘图、其他后端与真实长片质量。已有主模型、MTP 与视觉权重可继续使用，无需重新下载。
 
 节点使用独立语义版本，运行包仍使用 `上游版本-t8.修订`。两者通过协议 1 通信，节点 ID 保持稳定。运行包退出后用 UPDATE-PORTABLE 自动获取正式版；旧无权重包先更新后用 INSTALL-VISION 切换，模型目录及视觉编码方式/token 设置保留。旧文字配置首次启用视觉可运行 START-HERE.bat --vision gpu，或在托管档案选择 vision:gpu。
 

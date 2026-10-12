@@ -1,0 +1,17 @@
+{
+  "1": {"class_type": "StrataT8Connection", "inputs": {"profile": "default"}},
+  "2": {"class_type": "LoadVideo", "inputs": {"file": "YOUR_VIDEO.mp4"}},
+  "3": {
+    "class_type": "StrataT8VideoSample",
+    "inputs": {"video": ["2", 0], "fps": 24, "timestamps_json": "", "start_s": 0,
+               "end_s": 0, "sampling_fps": 1, "max_frames": 64, "max_pixels": 589824}
+  },
+  "4": {
+    "class_type": "StrataT8VideoAnalyze",
+    "inputs": {"connection": ["1", 0], "frames": ["3", 0], "manifest_json": ["3", 1],
+               "task": "timeline", "question": "按时间顺序描述观察到的人物、动作与镜头变化，标明采样造成的不确定性。",
+               "mode": "frames", "frames_per_segment": 8, "max_pixels": 589824,
+               "max_tokens": 2048, "temperature": 0.2, "top_p": 0.95, "top_k": 20,
+               "seed": 1, "reasoning_effort": "none", "refresh": 0, "transcript": ""}
+  }
+}

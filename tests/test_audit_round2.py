@@ -387,7 +387,7 @@ spec=importlib.util.spec_from_file_location('standalone_node',root/'__init__.py'
 node=importlib.util.module_from_spec(spec)
 sys.modules[spec.name]=node
 spec.loader.exec_module(node)
-assert len(node.NODE_CLASS_MAPPINGS)==10
+assert len(node.NODE_CLASS_MAPPINGS)==12
 assert node.nodes.StrataExtract().run('["a","b"]')[1:]==(['a','b'],['a','b'])
 assert not node.nodes.core.HOME.exists()
 assert 'serve' not in sys.modules
@@ -396,7 +396,7 @@ print(json.dumps({'nodes':len(node.NODE_CLASS_MAPPINGS),'runtime_imported':False
             result = subprocess.run([sys.executable,'-B','-c',script,str(renamed)], cwd=root, env=env,
                                     capture_output=True, encoding='utf-8', timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertEqual(json.loads(result.stdout), {'nodes':10,'runtime_imported':False})
+            self.assertEqual(json.loads(result.stdout), {'nodes':12,'runtime_imported':False})
 
 
 if __name__ == '__main__':

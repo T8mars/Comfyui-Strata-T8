@@ -4,7 +4,7 @@ import hashlib
 import math
 import re
 from pathlib import Path
-from . import core
+from . import core, video as video_tools
 
 CONNECTION = 'STRATA_CONNECTION'
 TEXT_LIST = 'STRATA_TEXT_LIST'
@@ -28,6 +28,27 @@ IMAGE_PRESETS = {
     'ocr': 'Transcribe readable text in reading order. Preserve original language and line breaks. Mark illegible text; do not invent characters.',
     'question': 'Answer the user question using the image. Separate visible evidence from inference.',
     'evaluate': 'Evaluate this image under the user rubric. State visible evidence, uncertainties and concrete improvements. Any score is your subjective judgment.'}
+VIDEO_PRESETS = {
+    'overview': 'Summarize visible subjects, actions, setting and temporal progression.',
+    'timeline': 'Describe observable events in chronological order with their evidence frame IDs.',
+    'storyboard': 'Describe the observed shots, composition and camera movement, distinguishing apparent motion from certainty.',
+    'question': 'Answer the user question using the sampled visual evidence and optional supplied transcript.',
+    'prompt': 'Write an English video-generation prompt preserving observed appearance, action progression and camera movement.'}
+VIDEO_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['report', 'events', 'shots', 'prompt', 'limitations'],
+    'properties': {
+        'report': {'type': 'string', 'maxLength': 3000},
+        'prompt': {'type': 'string', 'maxLength': 3000},
+        'limitations': {'type': 'array', 'maxItems': 16, 'items': {'type': 'string', 'maxLength': 500}},
+        'events': {'type': 'array', 'maxItems': 64, 'items': {
+            'type': 'object', 'additionalProperties': False,
+            'required': ['start_s', 'end_s', 'description', 'evidence_frames'],
+            'properties': {'start_s': {'type': 'number', 'minimum': 0}, 'end_s': {'type': 'number', 'minimum': 0},
+                           'description': {'type': 'string', 'maxLength': 1000},
+                           'evidence_frames': {'type': 'array', 'minItems': 1, 'maxItems': 64,
+                                               'items': {'type': 'integer', 'minimum': 0, 'maximum': 63}}}}},
+        'shots': {'type': 'array', 'maxItems': 64, 'items': {'type': 'string', 'maxLength': 1000}}}}
 
 
 def sampling():
@@ -449,6 +470,171 @@ class StrataImageBatch(Base):
         return outputs, json.dumps([{'index': i, 'output': a[0], 'reasoning': a[1], 'usage': json.loads(a[2])} for i, a in enumerate(answers)], ensure_ascii=False), outputs
 
 
+class StrataVideoSample(Base):
+    RETURN_TYPES, RETURN_NAMES = ('IMAGE', 'STRING'), ('frames', 'manifest_json')
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {
+            'fps': ('FLOAT', {'default': 24, 'min': .001, 'max': 240}),
+            'timestamps_json': ('STRING', {'multiline': True, 'default': ''}),
+            'start_s': ('FLOAT', {'default': 0, 'min': 0, 'max': 86400}),
+            'end_s': ('FLOAT', {'default': 0, 'min': 0, 'max': 86400}),
+            'sampling_fps': ('FLOAT', {'default': 1, 'min': .01, 'max': 30}),
+            'max_frames': ('INT', {'default': 64, 'min': 1, 'max': 64}),
+            'max_pixels': ('INT', {'default': 589824, 'min': 65536, 'max': 1048576})},
+            'optional': {'video': ('VIDEO',), 'images': ('IMAGE',)}}
+
+    def run(self, video=None, images=None, fps=24, timestamps_json='', start_s=0, end_s=0,
+            sampling_fps=1, max_frames=64, max_pixels=589824):
+        video_tools.number(end_s, 'end_s')
+        result = video_tools.sample_input(video, images, fps=fps, timestamps_json=timestamps_json,
+                                         start_s=start_s, end_s=None if end_s == 0 else end_s,
+                                         sampling_fps=sampling_fps, max_frames=max_frames, max_pixels=max_pixels)
+        return video_tools.tensor_result(result)
+
+
+class StrataVideoAnalyze(Base):
+    RETURN_TYPES = ('STRING', 'STRING', 'STRING', 'STRING', 'STRING')
+    RETURN_NAMES = ('report', 'analysis_json', 'evidence_json', 'coverage_json', 'usage_json')
+    OUTPUT_NODE = True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        settings = sampling()
+        settings['max_tokens'] = ('INT', {'default': 2048, 'min': 128, 'max': 4096})
+        return {'required': {'connection': (CONNECTION,), 'frames': ('IMAGE',),
+                             'manifest_json': ('STRING', {'forceInput': True}),
+                             'task': (list(VIDEO_PRESETS),),
+                             'question': ('STRING', {'multiline': True, 'default': ''}),
+                             'mode': (['frames', 'native'],),
+                             'frames_per_segment': ('INT', {'default': 8, 'min': 2, 'max': 16}),
+                             'max_pixels': ('INT', {'default': 589824, 'min': 65536, 'max': 1048576}),
+                             **settings},
+                'optional': {'transcript': ('STRING', {'multiline': True, 'default': ''})}}
+
+    def run(self, connection, frames, manifest_json, task='overview', question='', mode='frames',
+            frames_per_segment=8, max_pixels=589824, transcript='', **options):
+        selected = preset(task, VIDEO_PRESETS)
+        if mode not in ('frames', 'native'):
+            raise core.StrataError('Video mode must be frames or native')
+        if type(frames_per_segment) is not int or not 2 <= frames_per_segment <= (8 if mode == 'frames' else 16):
+            raise core.StrataError('Use 2–8 frames per segment in frames mode, or 2–16 in native mode')
+        if mode == 'native' and frames_per_segment % 2:
+            raise core.StrataError('Native video segments require an even frame count')
+        if not isinstance(transcript, str) or len(transcript.encode('utf-8', 'surrogatepass')) > 8192:
+            raise core.StrataError('Optional transcript must be text of at most 8 KiB')
+        if not isinstance(question, str) or len(question.encode('utf-8', 'surrogatepass')) > 4096:
+            raise core.StrataError('Video question must be text of at most 4 KiB')
+        core.text_unicode(transcript)
+        request(question, selected, **options)
+        if 'max_tokens' in options and options['max_tokens'] > 4096:
+            raise core.StrataError('Video output is limited to 4096 tokens per stage')
+        if not hasattr(frames, 'shape') or len(frames.shape) != 4 or not 1 <= frames.shape[0] <= 64:
+            raise core.StrataError('Video analysis requires 1–64 sampled frames')
+        if mode == 'native' and (frames.shape[0] < 2 or frames.shape[0] % 2):
+            raise core.StrataError('Native video requires at least two frames and an even total count')
+        try:
+            raw_manifest = core.json_loads(manifest_json)
+            if not isinstance(raw_manifest, dict) or type(raw_manifest.get('contract_version')) is not int:
+                raise ValueError('Video manifest contract_version must be integer 1')
+            manifest = video_tools.shared().validate_manifest(raw_manifest, int(frames.shape[0]))
+        except ValueError as error:
+            raise core.StrataError(str(error)) from None
+        video_tools.number(manifest['sampling'].get('sampling_fps', 1), 'manifest sampling_fps', high=120, positive=True)
+        if manifest['sampling']['end_s'] - manifest['sampling'].get('start_s', 0) > video_tools.MAX_DURATION:
+            raise core.StrataError('Video analysis window must be at most 3600 seconds')
+        if any(not 0 <= frame['index'] <= 63 for frame in manifest['frames']):
+            raise core.StrataError('Video evidence frame IDs must be between 0 and 63')
+        check_service_schema(VIDEO_SCHEMA)
+        if type(max_pixels) is not int or not 65536 <= max_pixels <= 1048576:
+            raise core.StrataError('Video max_pixels must be between 65536 and 1048576')
+        if frames.shape[1] * frames.shape[2] * frames.shape[0] > 64 * 1048576:
+            raise core.StrataError('Sampled video tensor exceeds the CPU conversion budget')
+        encoded = core.encode_images(frames, max_images=64, max_pixels=max_pixels)
+        core.interrupted()
+        evidence = manifest['frames']
+        instruction = (selected + ' These are sampled frames in chronological order, not continuous full-rate video. '
+                       'Use only provided frame IDs and relative timestamps. Never invent unseen motion or audio. '
+                       'An optional transcript is user-supplied text, not verified audio. Distinguish observation from inference. '
+                       'Return the requested JSON schema. Use empty events/shots/prompt when not needed. '
+                       'Include sampling gaps and uncertainty in limitations. All event times must be within the supplied frame interval.')
+        static = []
+        spans = []
+        for offset in range(0, len(encoded), frames_per_segment):
+            chunk = evidence[offset:offset + frames_per_segment]
+            req = request(question, instruction, **options)
+            content = [{'type': 'text', 'text': json.dumps({'task': task, 'question': question,
+                                                          'frames': chunk, 'transcript': transcript}, ensure_ascii=False)}]
+            if mode == 'native':
+                content.append(video_tools.native_part(encoded[offset:offset + frames_per_segment], chunk, manifest))
+            else:
+                for source, frame in zip(encoded[offset:offset + frames_per_segment], chunk):
+                    content.extend([{'type': 'text', 'text': f"Frame {frame['index']} at {frame['timestamp_s']:.6f} seconds"},
+                                    {'type': 'image_url', 'image_url': {'url': source}}])
+            req['messages'][-1]['content'] = content
+            req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'video_analysis', 'schema': VIDEO_SCHEMA}}
+            static.append(req)
+            spans.append(chunk)
+        initial = []
+        final = []
+        first_stage = True
+        allowed_ids = {frame['index'] for frame in evidence}
+        min_time, max_time = evidence[0]['timestamp_s'], evidence[-1]['timestamp_s']
+
+        def parse_answer(answer, ids, start, end):
+            value = validated(answer[0], VIDEO_SCHEMA)
+            for event in value['events']:
+                if (event['start_s'] > event['end_s'] or event['start_s'] < start - 1e-6
+                        or event['end_s'] > end + 1e-6 or any(index not in ids for index in event['evidence_frames'])):
+                    raise StructuredOutputError('Video analysis returned an event outside its evidence frames or timestamps')
+            return value
+
+        def continuation(answers, status):
+            nonlocal first_stage
+            if first_stage:
+                parsed = [parse_answer(answer, {frame['index'] for frame in span}, span[0]['timestamp_s'], span[-1]['timestamp_s'])
+                          for answer, span in zip(answers, spans)]
+                initial.extend(parsed)
+                first_stage = False
+            else:
+                parsed = [parse_answer(answer, allowed_ids, min_time, max_time) for answer in answers]
+            if len(parsed) == 1:
+                final.append(parsed[0])
+                return None
+            # A bounded hierarchy fits summaries into the same lease; raw chunk reports stay in the output.
+            groups, group = [], []
+            for value in parsed:
+                candidate = group + [value]
+                if group and (len(candidate) > 4 or len(json.dumps(candidate, ensure_ascii=False).encode('utf-8')) > 12000):
+                    groups.append(group)
+                    group = [value]
+                else:
+                    group = candidate
+            if group:
+                groups.append(group)
+            if len(groups) >= len(parsed):
+                raise core.StrataError('Video summaries exceed the 32K-safe merge budget; reduce per-segment output length')
+            requests = []
+            for group in groups:
+                req = request(json.dumps({'task': task, 'question': question, 'segments': group,
+                                          'coverage': manifest.get('coverage', {})}, ensure_ascii=False),
+                              instruction + ' Merge these segment reports. Preserve evidence IDs and time ranges; do not add new visual facts.', **options)
+                req['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'video_summary', 'schema': VIDEO_SCHEMA}}
+                requests.append(req)
+            return requests
+
+        answers = core.generate_pipeline(connection, static, continuation, max_followups=32,
+                                         capability_check=video_tools.native_capability if mode == 'native' else None)
+        result = {'contract_version': 1, 'mode': mode, 'task': task, 'analysis': final[0],
+                  'segments': initial, 'source': manifest.get('source', {}), 'coverage': manifest.get('coverage', {})}
+        report = final[0]['prompt'] if task == 'prompt' and final[0]['prompt'] else final[0]['report']
+        outputs = (report, json.dumps(result, ensure_ascii=False), json.dumps(evidence, ensure_ascii=False),
+                   json.dumps(manifest.get('coverage', {}), ensure_ascii=False),
+                   json.dumps({'requests': len(answers), 'stages': [core.json_loads(answer[2]) for answer in answers]}, ensure_ascii=False))
+        return {'ui': {'text': [report]}, 'result': outputs}
+
+
 class StrataControl(Base):
     RETURN_TYPES, RETURN_NAMES = (CONNECTION, 'STRING', 'STRING', 'IMAGE'), ('connection', 'status_json', 'text', 'images')
     OUTPUT_NODE = True
@@ -475,10 +661,12 @@ NODE_CLASS_MAPPINGS = {
     'StrataT8Connection': StrataConnection, 'StrataT8Text': StrataText, 'StrataT8Prompt': StrataPrompt,
     'StrataT8Structured': StrataStructured, 'StrataT8Extract': StrataExtract, 'StrataT8Number': StrataNumber,
     'StrataT8Image': StrataImage, 'StrataT8Batch': StrataBatch, 'StrataT8ImageBatch': StrataImageBatch,
+    'StrataT8VideoSample': StrataVideoSample, 'StrataT8VideoAnalyze': StrataVideoAnalyze,
     'StrataT8Control': StrataControl}
 NODE_DISPLAY_NAME_MAPPINGS = {
     'StrataT8Connection': 'Strata 连接 / Connection', 'StrataT8Text': 'Strata 文本生成 / Text',
     'StrataT8Prompt': 'Strata 提示词助手 / Prompt', 'StrataT8Structured': 'Strata 结构化分镜 / JSON',
     'StrataT8Extract': 'Strata JSON 提取 / Extract', 'StrataT8Number': 'Strata JSON 数值 / Number',
     'StrataT8Image': 'Strata 图片分析 / Vision', 'StrataT8Batch': 'Strata 文本批量 / Batch',
-    'StrataT8ImageBatch': 'Strata 图片批量 / Image Batch', 'StrataT8Control': 'Strata 服务控制 / Control'}
+    'StrataT8ImageBatch': 'Strata 图片批量 / Image Batch', 'StrataT8Control': 'Strata 服务控制 / Control',
+    'StrataT8VideoSample': 'Strata 视频采样 / Video Sample', 'StrataT8VideoAnalyze': 'Strata 视频分析 / Video Analyze'}

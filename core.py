@@ -759,18 +759,38 @@ def cleanup(client, profile, manager, baseline):
     return stopped
 
 
-def generate(connection, requests):
+def validate_requests(requests):
     if not isinstance(requests, list) or not 1 <= len(requests) <= 64 or any(
             not isinstance(request, dict) or not isinstance(request.get('messages'), list) or not request['messages']
             or any(not isinstance(message, dict) for message in request['messages']) for request in requests):
         raise StrataError('Provide 1–64 request objects with a nonempty array of message objects')
     for request in requests:
         request_payload(request)
+
+
+def generate(connection, requests):
+    validate_requests(requests)
     with profile_lock(connection.profile):
         return _generate(connection, requests)
 
 
-def _generate(connection, requests):
+def generate_pipeline(connection, requests, continuation, *, max_followups=32, capability_check=None):
+    """Dependent summaries share the original service lease and its single cleanup.
+
+    All static image conversion and request validation precede the lease. The callback
+    receives the latest stage's answers and trusted status, and returns the next bounded
+    batch, or None. It must not call generate() recursively.
+    """
+    validate_requests(requests)
+    if not callable(continuation) or type(max_followups) is not int or not 1 <= max_followups <= 64:
+        raise StrataError('Invalid bounded generation pipeline')
+    if capability_check is not None and not callable(capability_check):
+        raise StrataError('Invalid capability check')
+    with profile_lock(connection.profile):
+        return _generate(connection, requests, continuation, max_followups, capability_check)
+
+
+def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None):
     profile = read_profile(connection.profile)
     needs_vision = any(isinstance(message.get('content'), list)
                       for request in requests for message in request['messages'])
@@ -798,12 +818,16 @@ def _generate(connection, requests):
                 raise StrataError('Strata is busy with another request; automatic lifecycle cleanup requires an idle service')
             if needs_vision and not status['vision']['enabled']:
                 raise StrataError('Enable the bundled vision encoder in this profile')
+            if capability_check is not None:
+                capability_check(status)
             cleanup_required = bool(profile.get('allow_lifecycle'))
             if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
                 if cleanup(client, profile, manager, None):
                     # A confirmed fallback stop invalidates the old HTTP/model identity.
                     status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile))
                     service_status(status)
+                    if capability_check is not None:
+                        capability_check(status)
                     if status['activity']['in_flight']:
                         cleanup_required = False  # Do not unload another active request.
                         raise StrataError('Strata is busy with another request; retry after it finishes')
@@ -811,7 +835,10 @@ def _generate(connection, requests):
                         raise StrataError('Same-GPU mode requires parallel=1')
             baseline = gpu_handoff(profile) if profile.get('same_gpu') else None
             answers = []
-            for request in requests:
+            pending = list(requests)
+            stage_start, followups = 0, 0
+            while pending:
+                request = pending.pop(0)
                 check()
                 request = dict(request, model=status['model'], stream=False)
                 if any(isinstance(m.get('content'), list) for m in request['messages']) and not status['vision']['enabled']:
@@ -831,6 +858,17 @@ def _generate(connection, requests):
                 if not text:
                     raise StrataError('Model returned no final answer; increase max_tokens or reduce reasoning effort')
                 answers.append((text, reasoning, json.dumps(usage, ensure_ascii=False)))
+                if not pending and continuation is not None:
+                    check()
+                    next_stage = continuation(answers[stage_start:], status)
+                    check()
+                    if next_stage is not None:
+                        validate_requests(next_stage)
+                        followups += len(next_stage)
+                        if followups > max_followups:
+                            raise StrataError('Generation pipeline exceeded its follow-up request limit')
+                        pending = list(next_stage)
+                        stage_start = len(answers)
             return answers
         finally:
             if cleanup_required:

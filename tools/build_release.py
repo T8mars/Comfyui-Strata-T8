@@ -9,7 +9,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIPPING = {'__init__.py', 'core.py', 'nodes.py', 'panel.py', 'README.md', 'LICENSE',
-            'requirements.txt', 'pyproject.toml', 'version.json', 'profile.example.json'}
+            'requirements.txt', 'pyproject.toml', 'version.json', 'profile.example.json',
+            'video.py', 'video_shared.py', 'video-shared-source.json'}
 
 
 def main():
