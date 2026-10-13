@@ -4,6 +4,7 @@
   "vision": true,
   "video_sampling": true,
   "video_frames_analysis": true,
+  "video_full_window_streaming": true,
   "video_native_capability_negotiation": true,
   "video_native_hardware_verified": true,
   "video_audio_input": false,

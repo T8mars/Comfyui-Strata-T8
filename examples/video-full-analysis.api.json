@@ -1,0 +1,16 @@
+{
+  "1": {"class_type": "StrataT8Connection", "inputs": {"profile": "default"}},
+  "2": {"class_type": "LoadVideo", "inputs": {"file": "YOUR_VIDEO.mp4"}},
+  "3": {
+    "class_type": "StrataT8VideoAnalyzeFull",
+    "inputs": {
+      "connection": ["1", 0], "video": ["2", 0], "task": "timeline",
+      "question": "按时间顺序描述人物动作、画面与镜头变化，区分观察和推断。",
+      "mode": "frames", "start_s": 0, "duration_s": 10, "sampling_fps": 24,
+      "frames_per_segment": 8, "max_pixels": 589824, "max_tokens": 2048,
+      "temperature": 0, "top_p": 0.95, "top_k": 20, "seed": 1,
+      "reasoning_effort": "none", "refresh": 0, "fps": 24,
+      "timestamps_json": "", "transcript": ""
+    }
+  }
+}

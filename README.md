@@ -74,6 +74,7 @@ IQ3_S 主模型约 **83.62GB**，MTP 所需张量约 **5.22GB**，另需预处�
 | 结构化工作流 | Structured、Extract、Number：分镜 JSON、Schema 校验、字段提取、STRING 列表 |
 | 图片与批量 | Vision、Batch、Image Batch：描述、反推、OCR、问答、顺序批处理 |
 | 视频 | Video Sample、Video Analyze：有界采样、概述、时间轴、分镜观察、问答和视频提示词 |
+| 全程视频 | Full Video Analyze：直接接收 VIDEO / IMAGE，按秒数与帧率自动规划，逐段采样分析后汇总，总帧数可超过 64 |
 | 服务控制 | Connection、Control：状态、加载、卸载、停止自有服务及依赖透传 |
 
 Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持声明 Draft 4、7、2019-09 或 2020-12，仅允许本地引用。Vision 的 Schema 留空表示普通图片分析；重复 JSON 字段会报错。旧草案混合 dependencies 的 anchor 组合请改用 JSON Pointer 引用。
@@ -81,6 +82,10 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 导入 [examples](examples) 中三个 API 工作流，替换档案名与 SD1.5 绘图模型；看图示例先把附带 PNG 放入 `ComfyUI/input`。文本 → 绘图、图片反推 → 绘图、两镜头分镜 → 批量绘图均有示例。详细配置与限制见 [使用说明](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/USAGE.md)。
 
 ## 视频分析
+
+高密度分析使用 **Strata 全程视频分析 / Full Video Analyze**，直接接 VIDEO 或原始 IMAGE 批次，不先经过旧采样节点。填 `duration_s:10`、`sampling_fps:24` 自动规划约 240 帧，`duration_s:0` 分析整个剩余视频；IMAGE 的 `fps` 填原始批次帧率。frames 每段 2–8 帧、native 每段 2–16 帧，一次最多 256 段，全部共用一次服务租约。输出报告、JSON、证据、覆盖和用量，coverage 记录实际帧数与最大间隔。旧 64 帧工作流继续可用。
+
+示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.1.2 共提供 13 个节点，保留原有 12 个 ID；更新后重启 ComfyUI 加载。
 
 连接 `Load Video → Strata Video Sample → Strata Video Analyze`，并把采样节点的 `frames`、`manifest_json` 两个输出都接入分析节点。示例为 [video-analysis.api.json](examples/video-analysis.api.json)，将 `YOUR_VIDEO.mp4` 替换为 ComfyUI/input 内的文件。已有视频帧批次可连接 `IMAGE`，填写原始 fps；变帧率素材可提供每帧时间戳 JSON。
 
@@ -92,13 +97,15 @@ manifest 分开记录片段时间、输入位置与源 PTS；拼接使用合成�
 
 透明文件帧和 Components 的分离 alpha 在白背景合成，PQ/HLG HDR 文件和非 sRGB Components 需先转换为 SDR/sRGB。修正 MKV 非零 PTS 起点的时长、尾部截取与拼接时间轴。不同尺寸的采样帧保留比例、白色留边，并在 manifest 记录原尺寸、内容位置与实际张量宽高。支持原片后续短时间窗（位置 0–86400 秒，窗口最多 3600 秒）；`task:prompt` 的最终提示词为空或仅含空白时明确失败，避免把分析报告当作生成提示词。
 
-`native` 模式仅在服务明确声明视频协议能力后可用；未声明能力时直接报错。支持 1–64 个实际采样帧，原生模式每段 2–16 帧。奇数帧由服务内部复制该段末帧完成时序配对，节点保留真实帧数、时间戳和证据 ID；单帧无法提供运动方向证据。选择 `task:prompt` 可反推英文视频生成提示词，结果同时保留采样限制。模型名称和官方模型卡不能代替本地能力检查。节点不额外下载模型，不接收音轨；可选 `transcript` 为用户提供的转写文字，报告会与视觉证据区分。
+`native` 模式仅在服务明确声明视频协议能力后可用；未声明能力时直接报错。旧节点支持 1–64 个实际采样帧，Full Video Analyze 按前述段数限制处理更长窗口；原生模式每段 2–16 帧。奇数帧由服务内部复制该段末帧完成时序配对，节点保留真实帧数、时间戳和证据 ID；单帧无法提供运动方向证据。选择 `task:prompt` 可反推英文视频生成提示词，结果同时保留采样限制。模型名称和官方模型卡不能代替本地能力检查。节点不额外下载模型，不接收音轨；可选 `transcript` 为用户提供的转写文字，报告会与视觉证据区分。
 
 视频采样核心固定复制自 Strata-T8 的 `tools/strata_video.py`，来源与 SHA256 记录在 `video-shared-source.json`。节点运行不依赖本地源码目录，也不启动 ffmpeg 子进程。
 
 ## 环境与更新
 
-当前节点 **1.1.1** 配套 Strata-T8 **0.1.42-t8.3**，修复时间与证据、透明帧、汇总输出和重启清理，保留 12 个节点 ID 与协议 1。**347 项 CPU/HTTP 回归通过**，并经官方 VIDEO / torch CPU 复验；本版未重新验收模型 GPU 或真实长片质量。视频使用现有主模型及视觉编码器；抽帧模式兼容已有视觉 API，原生模式按服务能力协商。
+当前节点 **1.1.2** 配套 Strata-T8 **0.1.42-t8.6**，新增全程分段分析，修复浮点漏帧、分段汇总范围与时间，保留原有 12 个节点 ID 与协议 1。**359 项 CPU/HTTP 回归通过**，并经官方 VIDEO / torch CPU 的 240、288、360 帧流程复验；计数与流程验收使用模拟生成服务。
+
+RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文另完成 2 秒、24 FPS、48 帧合成视频的实际推理：frames 六段、native 三段都正确汇总约 1 秒处红→蓝及白圆向右、垂直位置不变。首次测试曾出现颜色和方向误判；为均匀背景增加可选 CPU 像素统计后，该案例通过。复杂动作、真实长片及 240/360 帧的 GPU 内容质量尚未验收，采样与文字汇总不能保证连续运动全部识别。
 
 2026-10-12 在 RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文上，通过真实 V3 节点验证两种模式的 8 秒合成视频：8 帧、两个 4 帧分段和一次汇总，均正确识别红→绿→蓝与白圆左→右；各流程只使用一组模型进程，结束后双进程退出。文字、单图和推理中取消清理也通过。
 

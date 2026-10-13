@@ -790,6 +790,15 @@ def generate_pipeline(connection, requests, continuation, *, max_followups=32, c
         return _generate(connection, requests, continuation, max_followups, capability_check)
 
 
+def generate_video_pipeline(connection, requests, continuation, *, capability_check=None):
+    """Opt-in streamed video stages share one lease with a bounded 512-call tail."""
+    validate_requests(requests)
+    if not callable(continuation) or (capability_check is not None and not callable(capability_check)):
+        raise StrataError('Invalid streaming video pipeline')
+    with profile_lock(connection.profile):
+        return _generate(connection, requests, continuation, 512, capability_check)
+
+
 def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None):
     profile = read_profile(connection.profile)
     needs_vision = any(isinstance(message.get('content'), list)

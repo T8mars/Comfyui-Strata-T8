@@ -29,6 +29,7 @@ core, nodes = fixture.core, fixture.nodes
 class InstallArtifacts(unittest.TestCase):
     def stage(self, root):
         tracked = subprocess.check_output(['git', '-c', 'index.threads=1', 'ls-files', '-z'], cwd=fixture.NODE_ROOT)
+        tracked = ('\0'.join(sorted(set(tracked.decode().split('\0')) - {''} | builder.SHIPPING))+'\0').encode()
         names = [name for name in tracked.decode().split('\0') if name and (
             name in builder.SHIPPING or name.startswith(('web/', 'examples/')))]
         for name in [*names, 'meta.json']:

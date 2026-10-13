@@ -97,14 +97,19 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
     stop = source_duration if end_s is None else min(end_s, source_duration)
     if stop <= start_s or stop - start_s > MAX_DURATION:
         raise core.StrataError('Select a nonempty IMAGE window of at most 3600 seconds')
-    candidates = [i for i, t in enumerate(values) if start_s <= t < stop]
+    candidates = [i for i, t in enumerate(values)
+                  if t >= start_s - 4*max(math.ulp(start_s), math.ulp(t))
+                  and t < stop - 4*max(math.ulp(stop), math.ulp(t))]
     if not candidates:
         raise core.StrataError('Video time range contains no frames')
     # Only selected tensor slices reach CPU; never .cpu() the entire video batch.
     selected = []
     for target in shared().sampling_schedule(start_s, stop, sampling_fps, max_frames):
-        index = bisect.bisect_left(values, target)
-        if index < len(values) and values[index] < stop and (not selected or index != selected[-1]):
+        # Equal CFR times reached through addition/division can differ by ulps.
+        # Do not skip the source frame solely because the target rounded upward.
+        index = bisect.bisect_left(values, target - 4*math.ulp(target))
+        if (index < len(values) and values[index] < stop - 4*max(math.ulp(stop), math.ulp(values[index]))
+                and (not selected or index != selected[-1])):
             selected.append(index)
     if not selected:
         raise core.StrataError('Video time range contains no frames')
@@ -366,6 +371,39 @@ def tensor_result(sampled):
         tensors.append(torch.from_numpy(np.asarray(image, dtype=np.float32).copy() / 255))
     core.interrupted()
     return torch.stack(tensors), json.dumps(sampled.manifest, ensure_ascii=False, allow_nan=False)
+
+
+def frame_measurements(image, content_box=None):
+    """Pixel statistics only for a sufficiently uniform region; no object labels."""
+    import numpy as np
+    from PIL import Image
+    image = image.convert('RGB').copy()
+    frame_width, frame_height = image.size
+    if content_box is not None:
+        x, y, box_width, box_height = content_box
+        image = image.crop((x, y, x+box_width, y+box_height))
+    image.thumbnail((256, 256), Image.Resampling.LANCZOS)
+    pixels = np.asarray(image, dtype=np.int16)
+    rgb = np.median(pixels.reshape(-1, 3), axis=0)
+    mask = np.max(np.abs(pixels-rgb), axis=2) > 45
+    fraction = float((~mask).mean())
+    if fraction < .8:
+        return {}
+    result = {'dominant_uniform_rgb': [int(v) for v in rgb], 'uniform_fraction': round(fraction, 4)}
+    count = int(mask.sum())
+    if .005*pixels.shape[0]*pixels.shape[1] <= count <= .20*pixels.shape[0]*pixels.shape[1]:
+        yy, xx = np.nonzero(mask)
+        result['foreground_region_center_xy'] = [round(float((xx+.5).mean()/pixels.shape[1]), 4),
+                                                  round(float((yy+.5).mean()/pixels.shape[0]), 4)]
+        result['foreground_region_fraction'] = round(1-fraction, 4)
+        result['center_tolerance_xy'] = [round(1/pixels.shape[1], 4), round(1/pixels.shape[0], 4)]
+        if content_box is not None:
+            cx, cy = result['foreground_region_center_xy']
+            result['foreground_region_center_xy'] = [round((x+cx*box_width)/frame_width,4),round((y+cy*box_height)/frame_height,4)]
+            result['center_tolerance_xy'] = [round(box_width/pixels.shape[1]/frame_width,4),round(box_height/pixels.shape[0]/frame_height,4)]
+    if content_box is not None:
+        result['rgb_region'] = 'content_inside_white_padding'
+    return result
 
 
 def native_capability(status):

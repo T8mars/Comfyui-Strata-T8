@@ -361,6 +361,9 @@ class StandalonePackageBoundaries(unittest.TestCase):
     def test_current_public_zip_loads_after_rename_without_runtime_source(self):
         from test_release import builder
         tracked = subprocess.check_output(['git','ls-files','-z'], cwd=fixture.NODE_ROOT)
+        # Build the isolated fixture from the public shipping allowlist even
+        # while a new source module has not been staged or committed locally.
+        tracked = ('\0'.join(sorted(set(tracked.decode().split('\0')) - {''} | builder.SHIPPING))+'\0').encode()
         names = [name for name in tracked.decode('utf-8').split('\0') if name and (name in builder.SHIPPING or name.startswith(('web/','examples/')))]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -387,7 +390,7 @@ spec=importlib.util.spec_from_file_location('standalone_node',root/'__init__.py'
 node=importlib.util.module_from_spec(spec)
 sys.modules[spec.name]=node
 spec.loader.exec_module(node)
-assert len(node.NODE_CLASS_MAPPINGS)==12
+assert len(node.NODE_CLASS_MAPPINGS)==13
 assert node.nodes.StrataExtract().run('["a","b"]')[1:]==(['a','b'],['a','b'])
 assert not node.nodes.core.HOME.exists()
 assert 'serve' not in sys.modules
@@ -396,7 +399,7 @@ print(json.dumps({'nodes':len(node.NODE_CLASS_MAPPINGS),'runtime_imported':False
             result = subprocess.run([sys.executable,'-B','-c',script,str(renamed)], cwd=root, env=env,
                                     capture_output=True, encoding='utf-8', timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertEqual(json.loads(result.stdout), {'nodes':12,'runtime_imported':False})
+            self.assertEqual(json.loads(result.stdout), {'nodes':13,'runtime_imported':False})
 
 
 if __name__ == '__main__':

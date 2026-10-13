@@ -649,6 +649,33 @@ class StrataVideoAnalyze(Base):
         return {'ui': {'text': [report]}, 'result': outputs}
 
 
+class StrataVideoAnalyzeFull(Base):
+    RETURN_TYPES = StrataVideoAnalyze.RETURN_TYPES
+    RETURN_NAMES = StrataVideoAnalyze.RETURN_NAMES
+    OUTPUT_NODE = True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        settings = sampling()
+        settings['max_tokens'] = ('INT', {'default': 2048, 'min': 128, 'max': 4096})
+        settings['temperature'] = ('FLOAT', {'default': 0, 'min': 0, 'max': 2, 'step': .05})
+        return {'required': {'connection': (CONNECTION,), 'task': (list(VIDEO_PRESETS),),
+            'question': ('STRING', {'multiline': True, 'default': ''}), 'mode': (['frames', 'native'],),
+            'start_s': ('FLOAT', {'default': 0, 'min': 0, 'max': 86400}),
+            'duration_s': ('FLOAT', {'default': 0, 'min': 0, 'max': 3600}),
+            'sampling_fps': ('FLOAT', {'default': 24, 'min': .01, 'max': 30}),
+            'frames_per_segment': ('INT', {'default': 8, 'min': 2, 'max': 16}),
+            'max_pixels': ('INT', {'default': 589824, 'min': 65536, 'max': 1048576}), **settings},
+            'optional': {'video': ('VIDEO',), 'images': ('IMAGE',),
+                'fps': ('FLOAT', {'default': 24, 'min': .001, 'max': 240}),
+                'timestamps_json': ('STRING', {'multiline': True, 'default': ''}),
+                'transcript': ('STRING', {'multiline': True, 'default': ''})}}
+
+    def run(self, connection, **kwargs):
+        from . import video_stream
+        return video_stream.run(connection, **kwargs)
+
+
 class StrataControl(Base):
     RETURN_TYPES, RETURN_NAMES = (CONNECTION, 'STRING', 'STRING', 'IMAGE'), ('connection', 'status_json', 'text', 'images')
     OUTPUT_NODE = True
@@ -676,6 +703,7 @@ NODE_CLASS_MAPPINGS = {
     'StrataT8Structured': StrataStructured, 'StrataT8Extract': StrataExtract, 'StrataT8Number': StrataNumber,
     'StrataT8Image': StrataImage, 'StrataT8Batch': StrataBatch, 'StrataT8ImageBatch': StrataImageBatch,
     'StrataT8VideoSample': StrataVideoSample, 'StrataT8VideoAnalyze': StrataVideoAnalyze,
+    'StrataT8VideoAnalyzeFull': StrataVideoAnalyzeFull,
     'StrataT8Control': StrataControl}
 NODE_DISPLAY_NAME_MAPPINGS = {
     'StrataT8Connection': 'Strata 连接 / Connection', 'StrataT8Text': 'Strata 文本生成 / Text',
@@ -683,4 +711,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     'StrataT8Extract': 'Strata JSON 提取 / Extract', 'StrataT8Number': 'Strata JSON 数值 / Number',
     'StrataT8Image': 'Strata 图片分析 / Vision', 'StrataT8Batch': 'Strata 文本批量 / Batch',
     'StrataT8ImageBatch': 'Strata 图片批量 / Image Batch', 'StrataT8Control': 'Strata 服务控制 / Control',
-    'StrataT8VideoSample': 'Strata 视频采样 / Video Sample', 'StrataT8VideoAnalyze': 'Strata 视频分析 / Video Analyze'}
+    'StrataT8VideoSample': 'Strata 视频采样 / Video Sample', 'StrataT8VideoAnalyze': 'Strata 视频分析 / Video Analyze',
+    'StrataT8VideoAnalyzeFull': 'Strata 全程视频分析 / Full Video Analyze'}
