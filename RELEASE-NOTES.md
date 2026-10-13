@@ -1,3 +1,7 @@
+## Strata-T8 ComfyUI 1.1.3
+
+README 增加 **By T8star**、两个项目仓库和社媒/资源入口，说明运行包 **0.1.42-t8.7** 的后台版本检查与一键更新。节点继续通过 Git/ComfyUI-Manager 更新并重启；保留 13 个节点、协议 1 和 1.1.2 的视频功能，不引入新的推理行为或依赖。节点 ZIP 不含 Python、引擎或模型，安装路径、模型来源与致谢见 [README](https://github.com/T8mars/Comfyui-Strata-T8/blob/v1.1.3/README.md)。本次发布 GitHub Release，Registry 保持手动发布。
+
 ## Strata-T8 ComfyUI 1.1.2
 
 新增 **Strata 全程视频分析 / Full Video Analyze**，直接接官方 VIDEO 或原始 IMAGE 批次。填写分析秒数与每秒观察帧数即可规划全程分段，例如 10 秒、24 FPS 规划约 240 帧；逐段采样与分析，再有界汇总，总帧数可超过 64。输出报告、JSON、证据、实际覆盖与用量，全部分段共享一次服务租约。

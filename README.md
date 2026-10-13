@@ -1,5 +1,7 @@
 # Strata-T8 for ComfyUI
 
+**By T8star**
+
 将 [Strata](https://github.com/Niko1221/Strata) 的本地语言与视觉推理接入 ComfyUI：提示词生成、结构化分镜、图片描述、视频采样分析与批量工作流。Strata 使用独立进程；同卡模式在推理结束后确认引擎退出，再交给下游绘图节点。
 
 **节点与运行包独立发行。** 本仓库不含模型、Python 或推理引擎；[Strata-T8 整合包](https://github.com/T8mars/Strata-T8) 提供 Python、依赖、CUDA/HIP 引擎，VisionReady 另含视觉权重与配置。
@@ -85,7 +87,7 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 高密度分析使用 **Strata 全程视频分析 / Full Video Analyze**，直接接 VIDEO 或原始 IMAGE 批次，不先经过旧采样节点。填 `duration_s:10`、`sampling_fps:24` 自动规划约 240 帧，`duration_s:0` 分析整个剩余视频；IMAGE 的 `fps` 填原始批次帧率。frames 每段 2–8 帧、native 每段 2–16 帧，一次最多 256 段，全部共用一次服务租约。输出报告、JSON、证据、覆盖和用量，coverage 记录实际帧数与最大间隔。旧 64 帧工作流继续可用。
 
-示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.1.2 共提供 13 个节点，保留原有 12 个 ID；更新后重启 ComfyUI 加载。
+示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.1.3 共提供 13 个节点，保留原有 12 个 ID；更新后重启 ComfyUI 加载。
 
 连接 `Load Video → Strata Video Sample → Strata Video Analyze`，并把采样节点的 `frames`、`manifest_json` 两个输出都接入分析节点。示例为 [video-analysis.api.json](examples/video-analysis.api.json)，将 `YOUR_VIDEO.mp4` 替换为 ComfyUI/input 内的文件。已有视频帧批次可连接 `IMAGE`，填写原始 fps；变帧率素材可提供每帧时间戳 JSON。
 
@@ -103,7 +105,7 @@ manifest 分开记录片段时间、输入位置与源 PTS；拼接使用合成�
 
 ## 环境与更新
 
-当前节点 **1.1.2** 配套 Strata-T8 **0.1.42-t8.6**，新增全程分段分析，修复浮点漏帧、分段汇总范围与时间，保留原有 12 个节点 ID 与协议 1。**359 项 CPU/HTTP 回归通过**，并经官方 VIDEO / torch CPU 的 240、288、360 帧流程复验；计数与流程验收使用模拟生成服务。
+当前节点 **1.1.3** 配套 Strata-T8 **0.1.42-t8.7**，新增全程分段分析，修复浮点漏帧、分段汇总范围与时间，保留原有 12 个节点 ID 与协议 1。**359 项 CPU/HTTP 回归通过**，并经官方 VIDEO / torch CPU 的 240、288、360 帧流程复验；计数与流程验收使用模拟生成服务。
 
 RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文另完成 2 秒、24 FPS、48 帧合成视频的实际推理：frames 六段、native 三段都正确汇总约 1 秒处红→蓝及白圆向右、垂直位置不变。首次测试曾出现颜色和方向误判；为均匀背景增加可选 CPU 像素统计后，该案例通过。复杂动作、真实长片及 240/360 帧的 GPU 内容质量尚未验收，采样与文字汇总不能保证连续运动全部识别。
 
@@ -117,10 +119,24 @@ RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文另完成 2 秒、24 F
 
 Python 3.10+；此前以运行包 0.1.39-t8.14 完成 ComfyUI 0.38.0 / 前端 1.53.10 / RTX 4060 Ti 16GB / 128GB RAM 的三类实际绘图验收。Windows 整合包需要 Windows 10 1903+/11 x64、AVX2 CPU、兼容显卡驱动，IQ3_S 建议 96GB 以上 RAM。默认同卡门槛为 12GiB 空闲显存、60GiB 空闲 RAM；其他后台进程仍会占用资源。AMD 文本以 Strata 上游支持列表为准，Windows AMD 视觉尚不支持，AMD 档案使用 `vision:no`。
 
-节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
+节点使用独立语义版本，通过 Manager 更新后重启 ComfyUI；Git 安装可退出 ComfyUI 后运行 `git pull --ff-only`。运行包启动时自动检查版本，模型设置页提供一键更新，也可使用自己的 `UPDATE-PORTABLE.bat`，上游同步由 [Strata-T8](https://github.com/T8mars/Strata-T8) 维护。节点 ID 保持兼容；本机档案保留在安装目录外。
 
 [第七组 20 轮检查与回归记录](https://github.com/T8mars/Comfyui-Strata-T8/blob/main/docs/AUDIT-20-ROUND7-NODES.md)；[第八组 20 轮检查与回归记录](docs/AUDIT-20-ROUND8-NODES.md)。节点支持当前 ComfyUI V3 API，并保留 V1 适配。
 
 ## 来源与致谢
 
 感谢 [Niko1221/Strata](https://github.com/Niko1221/Strata) 的推理引擎与服务、[Qwen](https://huggingface.co/Qwen) 的模型、[ISTA-DASLab](https://huggingface.co/ISTA-DASLab) 的 GSQ-RCO/GGUF 权重，以及 [ComfyUI](https://github.com/Comfy-Org/ComfyUI) 和 [ComfyUI-Manager](https://github.com/Comfy-Org/ComfyUI-Manager) 的节点与分发平台。本项目由 T8 维护，采用 [MIT](LICENSE)；模型与第三方组件遵循各自许可证。
+
+## T8star 与资源
+
+**By T8star** · [整合包仓库](https://github.com/T8mars/Strata-T8) · [ComfyUI 节点仓库](https://github.com/T8mars/Comfyui-Strata-T8)
+
+| 链接 | 地址 |
+| --- | --- |
+| B站 | [B站](https://space.bilibili.com/385085361) |
+| YouTube | [YouTube](https://www.youtube.com/@T8star-Aix/) |
+| API | [API](https://api.seedance.nz/sign-up?aff=5f4w) |
+| 免费画廊 | [免费画廊](https://www.openzhenzhen.com) |
+| 在线 AI 应用 | [在线 AI 应用](https://www.runninghub.ai/zh-cn/user-center/1907375370302308353/userPost?inviteCode=rh-v1121) |
+| ComfyUI 整合包 | [ComfyUI 整合包](https://pan.quark.cn/s/264edb7e36bd) |
+| Hugging Face | [Hugging Face](https://huggingface.co/t8star) |
