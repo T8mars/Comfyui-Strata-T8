@@ -390,16 +390,19 @@ spec=importlib.util.spec_from_file_location('standalone_node',root/'__init__.py'
 node=importlib.util.module_from_spec(spec)
 sys.modules[spec.name]=node
 spec.loader.exec_module(node)
-assert len(node.NODE_CLASS_MAPPINGS)==13
+original_ids={'StrataT8Connection','StrataT8Text','StrataT8Prompt','StrataT8Structured','StrataT8Extract','StrataT8Number','StrataT8Image','StrataT8Batch','StrataT8ImageBatch','StrataT8VideoSample','StrataT8VideoAnalyze','StrataT8VideoAnalyzeFull','StrataT8Control'}
+assert set(node.NODE_CLASS_MAPPINGS)==original_ids | {'StrataT8SpeechTranscribe'}
 assert node.nodes.StrataExtract().run('["a","b"]')[1:]==(['a','b'],['a','b'])
 assert not node.nodes.core.HOME.exists()
 assert 'serve' not in sys.modules
+assert 'standalone_node.speech' not in sys.modules
+assert not any(name.startswith(('onnxruntime','soxr','kaldi_native_fbank','qwen3asr_native')) for name in sys.modules)
 print(json.dumps({'nodes':len(node.NODE_CLASS_MAPPINGS),'runtime_imported':False}))
 '''
             result = subprocess.run([sys.executable,'-B','-c',script,str(renamed)], cwd=root, env=env,
                                     capture_output=True, encoding='utf-8', timeout=10)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertEqual(json.loads(result.stdout), {'nodes':13,'runtime_imported':False})
+            self.assertEqual(json.loads(result.stdout), {'nodes':14,'runtime_imported':False})
 
 
 if __name__ == '__main__':

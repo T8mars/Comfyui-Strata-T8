@@ -271,8 +271,13 @@ class Structured(unittest.TestCase):
 
 class Registration(unittest.TestCase):
     def test_legacy_ids_and_list_contracts_match_outputs(self):
-        self.assertEqual(len(nodes.NODE_CLASS_MAPPINGS), 13)
-        self.assertIn('StrataT8VideoAnalyzeFull', nodes.NODE_CLASS_MAPPINGS)
+        original_ids = {'StrataT8Connection', 'StrataT8Text', 'StrataT8Prompt', 'StrataT8Structured',
+                        'StrataT8Extract', 'StrataT8Number', 'StrataT8Image', 'StrataT8Batch',
+                        'StrataT8ImageBatch', 'StrataT8VideoSample', 'StrataT8VideoAnalyze',
+                        'StrataT8VideoAnalyzeFull', 'StrataT8Control'}
+        self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), original_ids | {'StrataT8SpeechTranscribe'})
+        self.assertEqual(nodes.StrataVideoAnalyzeFull.RETURN_TYPES,
+                         ('STRING', 'STRING', 'STRING', 'STRING', 'STRING'))
         for node_id, cls in nodes.NODE_CLASS_MAPPINGS.items():
             self.assertIn(node_id, nodes.NODE_DISPLAY_NAME_MAPPINGS)
             self.assertEqual(len(cls.RETURN_TYPES), len(cls.RETURN_NAMES))
@@ -309,6 +314,12 @@ class Registration(unittest.TestCase):
         result = extract.execute(json_text='{"shots":["a","b"]}', pointer='/shots', item_field='', expected_type='array')
         self.assertEqual(result.values[1:], (['a', 'b'], ['a', 'b']))
         self.assertTrue(extract.define_schema().inputs[0]['force_input'])
+        speech=mapping['StrataT8SpeechTranscribe'].define_schema()
+        audio=next(value for value in speech.inputs if value['name']=='audio')
+        self.assertTrue(audio['optional'])
+        self.assertEqual([output['name'] for output in speech.outputs],['text','timed_transcript','srt'])
+        automatic=next(value for value in speech.inputs if value['name']=='enable_asr')
+        self.assertFalse(automatic['default'])
 
 
 class Transport(unittest.TestCase):

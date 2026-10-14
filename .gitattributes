@@ -1,2 +1,5 @@
 video_shared.py text eol=lf
 video-shared-source.json text eol=lf
+speech_contract.py text eol=lf
+speech_media.py text eol=lf
+speech-shared-source.json text eol=lf

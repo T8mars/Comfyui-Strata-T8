@@ -1,0 +1,14 @@
+{
+  "1": {"class_type": "StrataT8Connection", "inputs": {"profile": "default"}},
+  "2": {"class_type": "LoadVideo", "inputs": {"file": "YOUR_VIDEO.mp4"}},
+  "3": {"class_type": "StrataT8VideoAnalyzeFull", "inputs": {
+    "connection": ["1", 0], "video": ["2", 0], "task": "timeline",
+    "question": "将提供的字幕与时间对应的画面一起分析，区分字幕引用和视觉观察。",
+    "mode": "frames", "start_s": 0, "duration_s": 10, "sampling_fps": 2,
+    "frames_per_segment": 8, "max_pixels": 589824, "max_tokens": 2048,
+    "temperature": 0, "top_p": 0.95, "top_k": 20, "seed": 1,
+    "reasoning_effort": "none", "refresh": 0, "enable_asr": false,
+    "fps": 24, "timestamps_json": "", "transcript": "", "audio_offset_s": 0,
+    "timed_transcript": "1\n00:00:00,000 --> 00:00:02,000\n将此示例替换成视频实际字幕，不要将示例当真实对白。\n"
+  }}
+}

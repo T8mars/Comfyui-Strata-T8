@@ -1,3 +1,15 @@
+## Strata-T8 ComfyUI 1.2.0
+
+新增 **Speech Transcribe**：VIDEO/AUDIO 转文字、时标 JSON 和 SRT。Video Analyze / Full Video Analyze 可按原时间戳结合对白与画面；`enable_asr` 默认关闭，也可直接输入已有时标字幕，不加载语音模型。转录一次后跨片段复用并按 cue ID 去重。
+
+修复低帧率源空窗口中断、首尾对白丢失、正负字幕时间校正，以及裁切/拼接的时钟映射。无画面而有对白的窗口使用纯文本阶段，拒绝虚构镜头。保留原 **13 个节点 ID** 与输出顺序，共 **14 个节点**，协议 1、V3/V1 适配继续兼容。
+
+语音功能需要 [Strata-T8 **0.1.42-t8.8**](https://github.com/T8mars/Strata-T8/releases/tag/v0.1.42-t8.8) 或更新版本，模型路径在 runtime 独立配置；推荐最小 2B Q4_K_M 与 Q8 音频 projector。节点不含 Python、引擎或任何权重，不在 ComfyUI Python 内加载 ASR 原生库。关闭 ASR 后既有功能仍可使用兼容旧运行包。
+
+**419 项 CPU/HTTP 回归通过**，另经官方 VIDEO/PyAV/torch CPU 验证 12 秒素材、裁切、空窗口与拼接。真实 Q4 转录及 native 视觉链路另做本机验收；对白时间是段级近似，不提供逐词对齐、说话人分离或音乐/环境声识别。[安装、模型来源、路径和示例](https://github.com/T8mars/Comfyui-Strata-T8/blob/v1.2.0/README.md)
+
+GitHub/ComfyUI-Manager 更新后重启 ComfyUI，本机连接档案保持在节点目录外。此版发布 GitHub Release；Registry 保持手动发布。
+
 ## Strata-T8 ComfyUI 1.1.3
 
 README 增加 **By T8star**、两个项目仓库和社媒/资源入口，说明运行包 **0.1.42-t8.7** 的后台版本检查与一键更新。节点继续通过 Git/ComfyUI-Manager 更新并重启；保留 13 个节点、协议 1 和 1.1.2 的视频功能，不引入新的推理行为或依赖。节点 ZIP 不含 Python、引擎或模型，安装路径、模型来源与致谢见 [README](https://github.com/T8mars/Comfyui-Strata-T8/blob/v1.1.3/README.md)。本次发布 GitHub Release，Registry 保持手动发布。

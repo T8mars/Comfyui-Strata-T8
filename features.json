@@ -7,7 +7,7 @@
   "video_full_window_streaming": true,
   "video_native_capability_negotiation": true,
   "video_native_hardware_verified": true,
-  "video_audio_input": false,
+  "video_audio_input": true,
   "batch": true,
   "managed_service": true,
   "same_gpu_handoff": true,
@@ -15,5 +15,8 @@
   "comfyui_v1_adapter": true,
   "registry_update": true,
   "runtime_bundled": false,
-  "models_bundled": false
+  "models_bundled": false,
+  "speech_transcription": true,
+  "timed_dialogue_fusion": true,
+  "speech_default_enabled": false
 }

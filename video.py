@@ -97,11 +97,6 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
     stop = source_duration if end_s is None else min(end_s, source_duration)
     if stop <= start_s or stop - start_s > MAX_DURATION:
         raise core.StrataError('Select a nonempty IMAGE window of at most 3600 seconds')
-    candidates = [i for i, t in enumerate(values)
-                  if t >= start_s - 4*max(math.ulp(start_s), math.ulp(t))
-                  and t < stop - 4*max(math.ulp(stop), math.ulp(t))]
-    if not candidates:
-        raise core.StrataError('Video time range contains no frames')
     # Only selected tensor slices reach CPU; never .cpu() the entire video batch.
     selected = []
     for target in shared().sampling_schedule(start_s, stop, sampling_fps, max_frames):
@@ -111,15 +106,18 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
         if (index < len(values) and values[index] < stop - 4*max(math.ulp(stop), math.ulp(values[index]))
                 and (not selected or index != selected[-1])):
             selected.append(index)
-    if not selected:
-        raise core.StrataError('Video time range contains no frames')
     pictures = [pil_frame(images[i], max_pixels, alpha[i]) if alpha is not None else pil_frame(images[i], max_pixels)
                 for i in selected]
-    result = shared().sample_images(pictures, fps=fps, timestamps=[values[i] for i in selected],
+    empty = None
+    try:
+        result = shared().sample_images(pictures, fps=fps, timestamps=[values[i] for i in selected],
                                    start_s=start_s, end_s=stop, sampling_fps=sampling_fps,
                                    max_frames=max_frames, max_pixels=max_pixels,
                                    max_duration_s=MAX_DURATION, cancel=core.interrupted,
                                    source_duration_s=source_duration, source_indices=selected, preselected=True)
+    except shared().VideoWindowEmpty as error:
+        empty = error
+        result = shared().SampledVideo([], error.manifest)
     # Tensor batches cannot recover original decoder PTS unless supplied explicitly.
     result.manifest.setdefault('source', {}).update({'timestamp_basis': 'provided' if timestamps_json.strip() else 'estimated_cfr',
                                                     'input_frame_count': int(images.shape[0]),
@@ -131,6 +129,8 @@ def sample_tensor(images, *, fps, timestamps_json='', start_s=0, end_s=None,
         frame['input_frame_index'] = index
         frame['timestamp_kind'] = 'provided' if timestamps_json.strip() else 'estimated'
     result.manifest['coverage']['timestamp_kind'] = 'provided' if timestamps_json.strip() else 'estimated'
+    if empty is not None:
+        raise empty
     return result
 
 
@@ -226,10 +226,15 @@ def file_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels,
     stop = duration if end_s is None else min(duration, end_s)
     if stop <= start_s or stop - start_s > MAX_DURATION:
         raise core.StrataError('Select a nonempty VIDEO window of at most 3600 seconds')
-    result = shared().sample_video(source, start_s=original_start + start_s,
+    empty = None
+    try:
+        result = shared().sample_video(source, start_s=original_start + start_s,
                                    end_s=original_start + stop, sampling_fps=sampling_fps,
                                    max_frames=max_frames, max_pixels=max_pixels, max_duration_s=MAX_DURATION,
                                    max_input_bytes=MAX_INPUT_BYTES, cancel=cancel, crop=crop)
+    except shared().VideoWindowEmpty as error:
+        empty = error
+        result = shared().SampledVideo([], error.manifest)
     result.manifest['source'].update({'adapter': 'official_file_state_v1', 'input_time_origin_s': start_s,
                                      'input_duration_s': duration, 'source_pts_preserved': True,
                                      'original_media_time_origin_s': original_start + start_s,
@@ -238,6 +243,8 @@ def file_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels,
     for frame in result.manifest['frames']:
         frame['input_timestamp_s'] = start_s + frame['timestamp_s']
         frame['original_media_timestamp_s'] = original_start + start_s + frame['timestamp_s']
+    if empty is not None:
+        raise empty
     return result
 
 
@@ -275,21 +282,34 @@ def list_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels)
         if component_targets:
             local_start = component_targets[0]
             local_end = min(component_duration, stop - offset, component_targets[-1] + step)
-            sampled = file_adapter(component, start_s=local_start, end_s=local_end, sampling_fps=1 / step,
-                                   max_frames=len(component_targets), max_pixels=max_pixels, cancel=check)
+            try:
+                sampled = file_adapter(component, start_s=local_start, end_s=local_end, sampling_fps=1 / step,
+                                       max_frames=len(component_targets), max_pixels=max_pixels, cancel=check)
+            except shared().VideoWindowEmpty:
+                # A source component can have no presentation frame in a
+                # subwindow. Other components still belong to this selection.
+                offset += component_duration
+                continue
             for frame in sampled.frames:
                 pictures.append(frame.image)
                 times.append(offset + local_start + frame.timestamp_s)
                 details.append({'component_index': component_index,
                                 'component_source_timestamp_s': frame.source_timestamp_s})
         offset += component_duration
-    result = shared().sample_images(pictures, fps=sampling_fps, timestamps=times, source_duration_s=duration,
+    empty = None
+    try:
+        result = shared().sample_images(pictures, fps=sampling_fps, timestamps=times, source_duration_s=duration,
                                     preselected=True, start_s=start_s, end_s=stop, sampling_fps=sampling_fps,
                                     max_frames=max_frames, max_pixels=max_pixels, cancel=check)
+    except shared().VideoWindowEmpty as error:
+        empty = error
+        result = shared().SampledVideo([], error.manifest)
     result.manifest['source'].update({'kind': 'video_list', 'timestamp_basis': 'composite_media_clock'})
     result.manifest['coverage']['timestamp_kind'] = 'composite'
     for frame, detail in zip(result.manifest['frames'], details):
         frame.update(detail, timestamp_kind='composite')
+    if empty is not None:
+        raise empty
     return result
 
 

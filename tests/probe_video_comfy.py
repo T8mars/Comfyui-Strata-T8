@@ -32,6 +32,13 @@ with tempfile.TemporaryDirectory() as directory, mock.patch.dict(sys.modules, {'
     sample_schema = sampler.GET_NODE_INFO_V1()
     assert sample_schema['input']['optional']['video'][0] == 'VIDEO'
     assert sample_schema['input']['optional']['images'][0] == 'IMAGE'
+    full_schema=mapping['StrataT8VideoAnalyzeFull'].GET_NODE_INFO_V1()
+    speech_schema=mapping['StrataT8SpeechTranscribe'].GET_NODE_INFO_V1()
+    assert full_schema['input']['optional']['audio'][0]=='AUDIO'
+    assert full_schema['input']['optional']['enable_asr'][1]['default'] is False
+    assert speech_schema['input']['optional']['video'][0]=='VIDEO'
+    assert speech_schema['input']['optional']['audio'][0]=='AUDIO'
+    assert speech_schema['input']['required']['enable_asr'][1]['default'] is False
     path = Path(directory) / 'video.mp4'
     with av.open(str(path), 'w') as container:
         stream = container.add_stream('libx264', rate=4)

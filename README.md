@@ -77,6 +77,7 @@ IQ3_S 主模型约 **83.62GB**，MTP 所需张量约 **5.22GB**，另需预处�
 | 图片与批量 | Vision、Batch、Image Batch：描述、反推、OCR、问答、顺序批处理 |
 | 视频 | Video Sample、Video Analyze：有界采样、概述、时间轴、分镜观察、问答和视频提示词 |
 | 全程视频 | Full Video Analyze：直接接收 VIDEO / IMAGE，按秒数与帧率自动规划，逐段采样分析后汇总，总帧数可超过 64 |
+| 语音与对白 | Speech Transcribe：VIDEO / AUDIO 转文字、时标 JSON 与 SRT；Video Analyze / Full Video Analyze 可选结合对白证据 |
 | 服务控制 | Connection、Control：状态、加载、卸载、停止自有服务及依赖透传 |
 
 Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持声明 Draft 4、7、2019-09 或 2020-12，仅允许本地引用。Vision 的 Schema 留空表示普通图片分析；重复 JSON 字段会报错。旧草案混合 dependencies 的 anchor 组合请改用 JSON Pointer 引用。
@@ -87,7 +88,9 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 高密度分析使用 **Strata 全程视频分析 / Full Video Analyze**，直接接 VIDEO 或原始 IMAGE 批次，不先经过旧采样节点。填 `duration_s:10`、`sampling_fps:24` 自动规划约 240 帧，`duration_s:0` 分析整个剩余视频；IMAGE 的 `fps` 填原始批次帧率。frames 每段 2–8 帧、native 每段 2–16 帧，一次最多 256 段，全部共用一次服务租约。输出报告、JSON、证据、覆盖和用量，coverage 记录实际帧数与最大间隔。旧 64 帧工作流继续可用。
 
-示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.1.3 共提供 13 个节点，保留原有 12 个 ID；更新后重启 ComfyUI 加载。
+`sampling_fps` 只控制采样密度；IMAGE 的 `fps` 决定输入时长，例如 144 帧在 12 FPS 是 12 秒，在 24 FPS 是 6 秒。官方 VIDEO 读取其原时间轴。低帧率或变帧率素材的空时间窗会计入 `completed_windows` / `empty_segments`，不会复用上一帧；有时标对白时仅分析该段对白，禁止添加该段画面、动作或镜头事实。
+
+示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.2.0 共提供 14 个节点，保留原有 13 个 ID；更新后重启 ComfyUI 加载。
 
 连接 `Load Video → Strata Video Sample → Strata Video Analyze`，并把采样节点的 `frames`、`manifest_json` 两个输出都接入分析节点。示例为 [video-analysis.api.json](examples/video-analysis.api.json)，将 `YOUR_VIDEO.mp4` 替换为 ComfyUI/input 内的文件。已有视频帧批次可连接 `IMAGE`，填写原始 fps；变帧率素材可提供每帧时间戳 JSON。
 
@@ -99,13 +102,38 @@ manifest 分开记录片段时间、输入位置与源 PTS；拼接使用合成�
 
 透明文件帧和 Components 的分离 alpha 在白背景合成，PQ/HLG HDR 文件和非 sRGB Components 需先转换为 SDR/sRGB。修正 MKV 非零 PTS 起点的时长、尾部截取与拼接时间轴。不同尺寸的采样帧保留比例、白色留边，并在 manifest 记录原尺寸、内容位置与实际张量宽高。支持原片后续短时间窗（位置 0–86400 秒，窗口最多 3600 秒）；`task:prompt` 的最终提示词为空或仅含空白时明确失败，避免把分析报告当作生成提示词。
 
-`native` 模式仅在服务明确声明视频协议能力后可用；未声明能力时直接报错。旧节点支持 1–64 个实际采样帧，Full Video Analyze 按前述段数限制处理更长窗口；原生模式每段 2–16 帧。奇数帧由服务内部复制该段末帧完成时序配对，节点保留真实帧数、时间戳和证据 ID；单帧无法提供运动方向证据。选择 `task:prompt` 可反推英文视频生成提示词，结果同时保留采样限制。模型名称和官方模型卡不能代替本地能力检查。节点不额外下载模型，不接收音轨；可选 `transcript` 为用户提供的转写文字，报告会与视觉证据区分。
+`native` 模式仅在服务明确声明视频协议能力后可用；未声明能力时直接报错。旧节点支持 1–64 个实际采样帧，Full Video Analyze 按前述段数限制处理更长窗口；原生模式每段 2–16 帧。奇数帧由服务内部复制该段末帧完成时序配对，节点保留真实帧数、时间戳和证据 ID；单帧无法提供运动方向证据。选择 `task:prompt` 可反推英文视频生成提示词，结果同时保留采样限制。模型名称和官方模型卡不能代替本地能力检查。节点不额外下载模型；默认不自动转录音轨，可选 `transcript` 仍为用户提供的无时标文字，报告会与视觉证据区分。
 
 视频采样核心固定复制自 Strata-T8 的 `tools/strata_video.py`，来源与 SHA256 记录在 `video-shared-source.json`。节点运行不依赖本地源码目录，也不启动 ffmpeg 子进程。
 
+### 自动转录与音画联合分析
+
+在 Strata 整合包的模型设置页单独配置语音模型目录，目录直接包含 **Confucius4-R2T2-Q4_K_M.gguf** 和 **mmproj-Confucius4-R2T2-Q8_0.gguf**，两份合计约 1.46 GB；VAD、Python 与原生运行组件由 Strata runtime 管理，节点不安装 vLLM、不下载权重，也不在 ComfyUI 的 Python 内加载 ASR 原生库。模型来源优先 [官方 ModelScope](https://modelscope.cn/models/netease-youdao/Confucius4-R2T2-GGUF/files)，也可从 [官方 Hugging Face](https://huggingface.co/netease-youdao/Confucius4-R2T2-GGUF/tree/86ff0251cb9f456b63aeef5f80137f104e22869a) 获取。语音 projector 与 Strata 的视觉 mmproj 是不同文件，不能互换。设备、语言、音轨和声道在 runtime 设置页配置，不将私人路径写入工作流。
+
+**Full Video Analyze 的 `enable_asr` 默认关闭**。勾选后对整个选中范围执行一次转录任务，再将具有原时间戳的完整对白与视觉片段对应；跨片段对白使用同一 cue ID，最终汇总去重，保留原始转录表。默认关闭不加载 ASR；用户显式提供 `timed_transcript` 时即使关闭也可直接融合，无需再转录。原 `transcript` 入口保持无时标辅助文字的旧行为。
+
+| 接法 | 输入与示例 |
+| --- | --- |
+| 直接分析视频音轨 | `LoadVideo → Full Video Analyze`，设置 `enable_asr:true`；[自动音画分析](examples/video-speech-analysis.api.json) |
+| 转录一次后复用 | `LoadVideo → Speech Transcribe → Full Video Analyze.timed_transcript`；同一个 VIDEO 接分析节点，分析节点保持 `enable_asr:false`；[独立转录与复用](examples/video-speech-reuse.api.json) |
+| 已有字幕 | 在分析节点的 `timed_transcript` 粘贴 SRT/VTT、参考 Confucius 节点的 `result_json` 或契约 JSON；[无需 ASR 的字幕融合](examples/video-subtitle-analysis.api.json) |
+| 已有 IMAGE 帧 | 显式连接匹配的 `AUDIO` 并启用 ASR，或提供时标字幕；IMAGE 自身没有声音。旧 Video Analyze 接收采样帧时需另外接 AUDIO |
+
+示例中的 `YOUR_VIDEO.mp4` 应替换成 `ComfyUI/input` 内的文件，Connection 档案名替换为本机设置。ASR 需要 **Strata-T8 0.1.42-t8.8** 或更新版本提供 `/v1/asr/settings` 与 `/v1/audio/transcribe`。1.2.0 新增 Speech Transcribe，保留原 13 个节点 ID 与原分析节点五项输出顺序；关闭 ASR 时既有文本/视觉功能保持兼容。
+
+SRT/VTT 默认时间对应输入 VIDEO 的时间轴。提供裁切后的字幕可使用 JSON 的 `timeline:"selected_window"`，其时间从本次选择范围的 0 开始；`timeline:"input"` 使用输入时间。显式 AUDIO 的 `audio_offset_s` 表示音频第一个样本位于 VIDEO 输入时间的哪一秒：正值补前置静音，负值裁掉提前部分。官方 VIDEO 的截取、拼接和容器 PTS 独立处理，避免重复加偏移；VideoFromList 有 `complete_audio` 时优先使用其最终音轨。
+
+运行设置中的 ASR `offset_ms` 是转录时标校正，节点在 VIDEO 输入时间轴上应用一次。它与 AUDIO 输入的 `audio_offset_s` 分别用于字幕校时和音轨位置；裁切窗口不会把提前的对白错误裁到临时上传音频的 0 秒。
+
+时标是 **VAD 段级近似时间**，不是字词强制对齐。联合报告引用对白 ID 与帧 ID，区分画面观察、对白文字和推断；不凭转录认定说话人身份、口型同步、背景音乐或音效。低声、配乐、重叠多人语音可能误识别，截断/强制边界保留复核标记。实际 Q4、CPU/CUDA 与真实视频质量以 runtime 的实机验收记录为准，不以 CPU 模拟节点测试代替。
+
+CPU ASR 不主动卸载驻留的 Strata 模型；CUDA 模式要求空闲、单请求服务及 `allow_lifecycle:true`，同卡使用 `same_gpu:true`。托管模式核对自有服务实例；external 档案已有 `instance_id` 时也会核对。节点先交接 ComfyUI 分配，runtime 在自己的服务租约内释放主模型与视觉进程后转录，不能抢占 DSH 的正在生成任务。主模型的 RAM/VRAM 门槛只用于主推理，不用于提前拒绝小型 ASR。视频范围最多 3600 秒，但单次节点上传还受 **64 MiB JSON/base64 请求预算**限制，Float32 PCM 约最多 48 MiB（16k mono 约 13 分钟，高采样率或多声道更短）；超限明确要求缩短范围。转换只复制选中 AUDIO 切片到 CPU；Stop/取消不发后续视觉请求，服务负责终止其自己的 ASR worker。
+
+ASR 实现复用 [T8mars/comfyui-confucius-r2t2-t8](https://github.com/T8mars/comfyui-confucius-r2t2-t8)，感谢 [网易有道 Confucius4-R2T2](https://github.com/netease-youdao/Confucius4-R2T2)、[llama.cpp](https://github.com/ggml-org/llama.cpp) 与 [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD)。ASR 代码、原生运行库、模型及 VAD 分别适用 Apache/MIT/网易有道模型许可，详见 runtime 的来源与许可清单。
+
 ## 环境与更新
 
-当前节点 **1.1.3** 配套 Strata-T8 **0.1.42-t8.7**，新增全程分段分析，修复浮点漏帧、分段汇总范围与时间，保留原有 12 个节点 ID 与协议 1。**359 项 CPU/HTTP 回归通过**，并经官方 VIDEO / torch CPU 的 240、288、360 帧流程复验；计数与流程验收使用模拟生成服务。
+当前节点 **1.2.0** 配套 Strata-T8 **0.1.42-t8.8**，提供 14 个节点与协议 1。新增默认关闭的语音转录和时标对白融合，修复稀疏源空窗口中断、首尾对白丢失、字幕校正与裁切/拼接时间轴。**419 项 CPU/HTTP 回归通过**；官方 VIDEO / torch CPU 验证实际 12 秒素材的帧率、裁切与拼接。真实 HTTP、Q4 语音模型与 native 视觉链路另完成音画联合验收，[范围与限制](https://github.com/T8mars/Strata-T8/blob/v0.1.42-t8.8/docs/VALIDATION-VIDEO-SPEECH-T8.md)。
 
 RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文另完成 2 秒、24 FPS、48 帧合成视频的实际推理：frames 六段、native 三段都正确汇总约 1 秒处红→蓝及白圆向右、垂直位置不变。首次测试曾出现颜色和方向误判；为均匀背景增加可选 CPU 像素统计后，该案例通过。复杂动作、真实长片及 240/360 帧的 GPU 内容质量尚未验收，采样与文字汇总不能保证连续运动全部识别。
 
