@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: T8mars/Strata-T8
-          ref: dea1fc08f1988b8210c7f8c7450c96cf5b89d02c # Strata-T8 0.1.42-t8.8 optional speech and protocol 1
+          ref: baad0605c33c277cbbec799747b9be56128e54c3 # Strata-T8 0.1.42-t8.9 video progress and protocol 1
           path: _strata
       - uses: actions/setup-python@v5
         with:
