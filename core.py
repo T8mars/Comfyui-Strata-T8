@@ -790,16 +790,16 @@ def generate_pipeline(connection, requests, continuation, *, max_followups=32, c
         return _generate(connection, requests, continuation, max_followups, capability_check)
 
 
-def generate_video_pipeline(connection, requests, continuation, *, capability_check=None):
+def generate_video_pipeline(connection, requests, continuation, *, capability_check=None, stage_cache=None):
     """Opt-in streamed video stages share one lease with a bounded 512-call tail."""
     validate_requests(requests)
     if not callable(continuation) or (capability_check is not None and not callable(capability_check)):
         raise StrataError('Invalid streaming video pipeline')
     with profile_lock(connection.profile):
-        return _generate(connection, requests, continuation, 512, capability_check)
+        return _generate(connection, requests, continuation, 512, capability_check, stage_cache=stage_cache)
 
 
-def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None):
+def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None, stage_cache=None):
     profile = read_profile(connection.profile)
     needs_vision = any(isinstance(message.get('content'), list)
                       for request in requests for message in request['messages'])
@@ -832,6 +832,7 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
         try:
             status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile) if profile.get('same_gpu') else None) if manager else client.request('/v1/status', check=check, timeout=5)
             authorize(status)
+            if stage_cache is not None:stage_cache.bind(status,client,check)
             cleanup_required = bool(profile.get('allow_lifecycle'))
             if profile.get('same_gpu') and (status['loaded'] or any(p['running'] or p['loaded'] or p['starting'] for p in status['processes'].values())):
                 if cleanup(client, profile, manager, None):
@@ -839,6 +840,7 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                     cleanup_required = False
                     status = manager.ensure(client, check=check, prepare_check=lambda: gpu_handoff(profile))
                     authorize(status)
+                    if stage_cache is not None:stage_cache.bind(status,client,check)
                     cleanup_required = bool(profile.get('allow_lifecycle'))
             baseline = gpu_handoff(profile) if profile.get('same_gpu') else None
             answers = []
@@ -850,7 +852,8 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                 request = dict(request, model=status['model'], stream=False)
                 if any(isinstance(m.get('content'), list) for m in request['messages']) and not status['vision']['enabled']:
                     raise StrataError('Enable the bundled vision encoder in this profile')
-                result = client.request('/v1/chat/completions', request, check=check)
+                result = stage_cache.get(request) if stage_cache is not None else None
+                if result is None:result = client.request('/v1/chat/completions', request, check=check)
                 choices = result.get('choices')
                 if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict) or not isinstance(choices[0].get('message'), dict):
                     raise StrataError('Malformed chat completion: missing choices/message')
@@ -864,10 +867,12 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                     raise StrataError('Malformed chat completion: text/reasoning/usage types')
                 if not text:
                     raise StrataError('Model returned no final answer; increase max_tokens or reduce reasoning effort')
+                if stage_cache is not None:stage_cache.record(request,result)
                 answers.append((text, reasoning, json.dumps(usage, ensure_ascii=False)))
                 if not pending and continuation is not None:
                     check()
                     next_stage = continuation(answers[stage_start:], status)
+                    if stage_cache is not None:stage_cache.commit()
                     check()
                     if next_stage is not None:
                         validate_requests(next_stage)

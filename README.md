@@ -48,6 +48,8 @@ IQ3_S 主模型约 **83.62GB**，MTP 所需张量约 **5.22GB**，另需预处�
 
 ## 连接与使用
 
+Full Video Analyze 提供可选自适应采样、跨段末帧参考和进度保存。开启 `save_progress` 后，相同视频与参数的重跑复用已校验的阶段结果；`progress_key` 留空自动选择任务，`clear_progress` 可清除。默认关闭，已有工作流与节点 ID 保持兼容。进度保存在本机档案目录 `video-progress`，24 小时后到期；原片仍需保留。保存进度要求 Strata-T8 **0.1.42-t8.9** 或更新版本。[使用与验证范围](https://github.com/T8mars/Strata-T8/blob/v0.1.42-t8.9/docs/VIDEO-PROGRESS.zh-CN.md)
+
 打开 ComfyUI 侧栏 **Strata-T8**，保存托管档案，刷新后在 Connection 节点选择名称：
 
 ```json
@@ -90,7 +92,7 @@ Structured 和 Vision 的 JSON Schema 根须显式写 `"type":"object"`；支持
 
 `sampling_fps` 只控制采样密度；IMAGE 的 `fps` 决定输入时长，例如 144 帧在 12 FPS 是 12 秒，在 24 FPS 是 6 秒。官方 VIDEO 读取其原时间轴。低帧率或变帧率素材的空时间窗会计入 `completed_windows` / `empty_segments`，不会复用上一帧；有时标对白时仅分析该段对白，禁止添加该段画面、动作或镜头事实。
 
-示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.2.0 共提供 14 个节点，保留原有 13 个 ID；更新后重启 ComfyUI 加载。
+示例：[全程分段分析](examples/video-full-analysis.api.json)。节点 1.3.0 共提供 14 个节点，保留原有 ID；更新后重启 ComfyUI 加载。
 
 连接 `Load Video → Strata Video Sample → Strata Video Analyze`，并把采样节点的 `frames`、`manifest_json` 两个输出都接入分析节点。示例为 [video-analysis.api.json](examples/video-analysis.api.json)，将 `YOUR_VIDEO.mp4` 替换为 ComfyUI/input 内的文件。已有视频帧批次可连接 `IMAGE`，填写原始 fps；变帧率素材可提供每帧时间戳 JSON。
 
@@ -133,7 +135,7 @@ ASR 实现复用 [T8mars/comfyui-confucius-r2t2-t8](https://github.com/T8mars/co
 
 ## 环境与更新
 
-当前节点 **1.2.0** 配套 Strata-T8 **0.1.42-t8.8**，提供 14 个节点与协议 1。新增默认关闭的语音转录和时标对白融合，修复稀疏源空窗口中断、首尾对白丢失、字幕校正与裁切/拼接时间轴。**419 项 CPU/HTTP 回归通过**；官方 VIDEO / torch CPU 验证实际 12 秒素材的帧率、裁切与拼接。真实 HTTP、Q4 语音模型与 native 视觉链路另完成音画联合验收，[范围与限制](https://github.com/T8mars/Strata-T8/blob/v0.1.42-t8.8/docs/VALIDATION-VIDEO-SPEECH-T8.md)。
+当前节点 **1.3.0** 配套 Strata-T8 **0.1.42-t8.9**，提供 14 个节点与协议 1。新增默认关闭的自适应采样、跨段参考和阶段进度复用；语音转录与时标对白融合继续可用。CPU/HTTP 回归及官方 VIDEO / torch CPU 检查覆盖 12 秒素材、裁切时钟和末段覆盖；进度复用使用受控响应验证，不代表真实长片理解质量提升。[视频进度与验证范围](https://github.com/T8mars/Strata-T8/blob/v0.1.42-t8.9/docs/VIDEO-PROGRESS.zh-CN.md)
 
 RTX 4060 Ti 16GB、128GB RAM、SC117 IQ3_S、32K 上下文另完成 2 秒、24 FPS、48 帧合成视频的实际推理：frames 六段、native 三段都正确汇总约 1 秒处红→蓝及白圆向右、垂直位置不变。首次测试曾出现颜色和方向误判；为均匀背景增加可选 CPU 像素统计后，该案例通过。复杂动作、真实长片及 240/360 帧的 GPU 内容质量尚未验收，采样与文字汇总不能保证连续运动全部识别。
 

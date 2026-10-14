@@ -10,7 +10,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 SHIPPING = {'__init__.py', 'core.py', 'nodes.py', 'panel.py', 'README.md', 'LICENSE',
             'requirements.txt', 'pyproject.toml', 'version.json', 'profile.example.json',
-            'video.py', 'video_shared.py', 'video_stream.py', 'video-shared-source.json',
+            'video.py', 'video_shared.py', 'video_stream.py', 'video_progress.py', 'video-shared-source.json',
             'speech.py', 'speech_contract.py', 'speech_media.py', 'speech-shared-source.json'}
 
 

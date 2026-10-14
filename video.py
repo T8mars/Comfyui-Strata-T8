@@ -314,7 +314,9 @@ def list_adapter(video, *, start_s, end_s, sampling_fps, max_frames, max_pixels)
 
 
 def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s=0, end_s=None,
-                 sampling_fps=1, max_frames=64, max_pixels=589824):
+                 sampling_fps=1, max_frames=64, max_pixels=589824, sampling_strategy='uniform'):
+    if sampling_strategy not in ('uniform','adaptive'):
+        raise core.StrataError('Sampling strategy must be uniform or adaptive')
     fps = number(fps, 'fps', high=240, positive=True)
     sampling_fps = number(sampling_fps, 'sampling_fps', high=30, positive=True)
     if fps < .001 or sampling_fps < .01:
@@ -333,6 +335,9 @@ def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s
         raise core.StrataError('Video max_pixels must be between 65536 and 1048576')
     if (video is None) == (images is None):
         raise core.StrataError('Connect exactly one VIDEO or IMAGE input')
+    if sampling_strategy=='adaptive':
+        return adaptive_input(video=video,images=images,fps=fps,timestamps_json=timestamps_json,start_s=start_s,
+                              end_s=end_s,sampling_fps=sampling_fps,max_frames=max_frames,max_pixels=max_pixels)
     if images is not None:
         return sample_tensor(images, fps=fps, timestamps_json=timestamps_json, start_s=start_s,
                              end_s=end_s, sampling_fps=sampling_fps, max_frames=max_frames, max_pixels=max_pixels)
@@ -363,6 +368,40 @@ def sample_input(video=None, images=None, *, fps=24, timestamps_json='', start_s
                             max_frames=max_frames, max_pixels=max_pixels)
     return file_adapter(video, start_s=start_s, end_s=end_s, sampling_fps=sampling_fps,
                         max_frames=max_frames, max_pixels=max_pixels, cancel=core.interrupted)
+
+
+def adaptive_input(**options):
+    """Scan through the official adapter, preserving crop, trim, alpha and lists."""
+    import copy
+    import math
+    begin=number(options['start_s'],'start_s',high=86400)
+    scan=sample_input(**{**options,'sampling_fps':min(8,max(2,options['sampling_fps']*4)),
+                         'max_frames':64,'max_pixels':65536})
+    stop=scan.manifest['coverage'].get('input_window_end_s',scan.manifest['sampling']['end_s'])
+    count=min(options['max_frames'],max(1,math.ceil((stop-begin)*options['sampling_fps'])))
+    raw_targets=shared().adaptive_targets(scan,count)
+    # Source PTS and the official VIDEO input clock can have different origins.
+    scan_times=[f.source_timestamp_s-scan.manifest['source']['time_origin_s'] for f in scan.frames]
+    indices=[scan_times.index(t) for t in raw_targets]
+    selected=[];metadata=[]
+    for index in indices:
+        core.interrupted()
+        target=scan.manifest['frames'][index].get('input_timestamp_s',begin+scan.frames[index].timestamp_s)
+        one=sample_input(**{**options,'start_s':target,'end_s':stop,'max_frames':1})
+        frame=one.frames[0];item=dict(one.manifest['frames'][0])
+        actual=item.get('input_timestamp_s',target+frame.timestamp_s)
+        frame.index=len(selected);frame.timestamp_s=max(0,actual-begin)
+        item.update(index=frame.index,timestamp_s=frame.timestamp_s)
+        if metadata and item['source_timestamp_s']<=metadata[-1]['source_timestamp_s']+1e-9:continue
+        selected.append(frame);metadata.append(item)
+    manifest=copy.deepcopy(scan.manifest);manifest['frames']=metadata
+    manifest['sampling'].update(max_frames=options['max_frames'],max_pixels=options['max_pixels'],
+        sampling_fps=options['sampling_fps'],requested_targets_s=raw_targets,strategy='adaptive',scan_frames=len(scan.frames))
+    times=[item['source_timestamp_s']-manifest['source']['time_origin_s'] for item in metadata]
+    manifest['coverage'].update(sample_count=len(selected),first_sample_s=times[0],last_sample_s=times[-1],
+        max_sample_gap_s=max((b-a for a,b in zip(times,times[1:])),default=0),
+        frame_cap_applied=math.ceil((manifest['sampling']['end_s']-manifest['sampling']['start_s'])*options['sampling_fps'])>options['max_frames'])
+    return shared().SampledVideo(selected,manifest)
 
 
 def tensor_result(sampled):

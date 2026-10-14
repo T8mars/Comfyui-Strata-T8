@@ -18,5 +18,8 @@
   "models_bundled": false,
   "speech_transcription": true,
   "timed_dialogue_fusion": true,
-  "speech_default_enabled": false
+  "speech_default_enabled": false,
+  "video_progress_recovery": true,
+  "video_adaptive_sampling": true,
+  "video_cross_window_continuity": true
 }

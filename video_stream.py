@@ -19,7 +19,8 @@ class EvidenceScope(dict):
 def run(connection, *, video=None, images=None, fps=24, timestamps_json='', start_s=0,
         duration_s=0, sampling_fps=24, task='overview', question='', mode='frames',
         frames_per_segment=8, max_pixels=589824, transcript='', enable_asr=False,
-        audio=None, audio_offset_s=0, timed_transcript='', **options):
+        audio=None, audio_offset_s=0, timed_transcript='', sampling_strategy='uniform',
+        continuity=False, save_progress=False, progress_key='', clear_progress=False, **options):
     from . import nodes
     # The input name shadows the module; keep the audited adapter explicit.
     from . import video as adapter
@@ -40,6 +41,32 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
             raise core.StrataError(f'Video {name} exceeds its text budget')
         core.text_unicode(text)
     nodes.request(question, selected, **options)
+    if sampling_strategy not in ('uniform','adaptive') or any(type(v) is not bool for v in (continuity,save_progress,clear_progress)):
+        raise core.StrataError('Invalid optional video sampling/progress settings')
+    if not isinstance(progress_key,str) or len(progress_key)>128:
+        raise core.StrataError('Video progress key must be at most 128 characters')
+    journal=None
+    if save_progress:
+        from .video_progress import Journal,source_fingerprint,fingerprint
+        config={'source':source_fingerprint(video,images,audio),'fps':fps,'timestamps':timestamps_json,'start':start_s,
+            'duration':duration_s,'sampling_fps':sampling_fps,'task':task,'question':question,'mode':mode,'frames':frames_per_segment,
+            'pixels':max_pixels,'transcript':transcript,'asr':enable_asr,'audio_offset':audio_offset_s,'timed':timed_transcript,
+            'strategy':sampling_strategy,'continuity':continuity,'generation':options}
+        from pathlib import Path
+        import hashlib
+        config['code']={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                        for name in ('video_stream.py','video_shared.py','video.py','video_progress.py','core.py','nodes.py')}
+        config['profile_context']=fingerprint({k:v for k,v in core.read_profile(connection.profile).items() if k!='api_key'})
+        key=fingerprint({'profile':connection.profile,'key':progress_key or fingerprint(config)})
+        if clear_progress:
+            path=core.HOME/'video-progress'/(key+'.json')
+            for item in [path,*path.parents]:
+                if item.is_symlink() or getattr(item,'is_junction',lambda:False)():raise core.StrataError('Linked video progress path')
+            path.unlink(missing_ok=True)
+        journal=Journal(key,config)
+    if continuity:
+        if frames_per_segment<3:raise core.StrataError('Cross-window continuity requires at least 3 frames per segment')
+        frames_per_segment-=1
     if options.get('max_tokens',2048) > 4096:
         raise core.StrataError('Video output is limited to 4096 tokens per stage')
     first_end = start_s + min(frames_per_segment/sampling_fps, duration_s or math.inf)
@@ -47,7 +74,8 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
         try:
             return adapter.sample_input(video=video, images=images, fps=fps, timestamps_json=timestamps_json,
                 start_s=begin, end_s=end, sampling_fps=sampling_fps,
-                max_frames=frames_per_segment, max_pixels=max_pixels)
+                max_frames=frames_per_segment, max_pixels=max_pixels,
+                **({'sampling_strategy':'adaptive'} if sampling_strategy=='adaptive' else {}))
         except adapter.shared().VideoWindowEmpty as error:
             return adapter.shared().SampledVideo([], error.manifest)
     first = sample(start_s, first_end)
@@ -118,7 +146,9 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
             'empty_windows':list(empty_windows),
             'analysis_completed':next_segment==count and len(initial)==issued_stages,
             'continuous_observation':False}
+    previous_visual=None
     def observation(sampled):
+        nonlocal previous_visual
         if sampled.frames:
             adapter.shared().validate_manifest(sampled.manifest,len(sampled.frames))
             tensor, _ = adapter.tensor_result(sampled)
@@ -142,6 +172,7 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
             evidence.append(item);chunk.append(item);times.append(input_time)
         stage_instruction=instruction
         if not sampled.frames:
+            previous_visual=None
             stage_instruction += (' This selected interval has NO source presentation frames. '
                 'Analyze only supplied timed speech; events and shots MUST be empty arrays. '
                 'Do not infer visual content, motion, colors, camera changes or lip sync in this gap.')
@@ -153,6 +184,15 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
                 **({'pixel_measurements':f['pixel_measurements']} if 'pixel_measurements' in f else {})} for f in chunk],
             'transcript':transcript},ensure_ascii=False)}]
         identities=set()
+        bridge=previous_visual if continuity and chunk else None
+        if continuity and chunk:
+            history=json.dumps(initial[-8:],ensure_ascii=False)
+            content.append({'type':'text','text':'Recent chronological reports (historical evidence, not current observations): '+history[-4000:]+
+                '\nThe boundary reference is the previous window’s last frame. On a cut or ambiguity, reset identity assumptions; never infer an unseen action.'})
+            if bridge:
+                source,frame=bridge
+                content.extend([{'type':'text','text':f"Boundary reference: earlier frame {frame['index']} at {frame['timestamp_s']:.6f}s; not a new sample."},
+                                {'type':'image_url','image_url':{'url':source}}])
         if speech is not None:
             from .speech_contract import relevant
             # Speech covers the requested chunk window, including intervals
@@ -176,7 +216,10 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
         # accurate; an all-text content list would otherwise require vision.
         req['messages'][-1]['content']=content if chunk else '\n\n'.join(part['text'] for part in content)
         req['response_format']={'type':'json_schema','json_schema':{'name':'video_analysis_full','schema':schema}}
-        return req,EvidenceScope({f['index']:f for f in chunk},speech_ids=identities)
+        scope={f['index']:f for f in chunk}
+        if bridge:scope[bridge[1]['index']]=bridge[1]
+        if chunk:previous_visual=(encoded[-1],chunk[-1])
+        return req,EvidenceScope(scope,speech_ids=identities)
     def next_observation():
         nonlocal next_segment,issued_stages
         while next_segment<count:
@@ -226,6 +269,7 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
         nonlocal next_segment,scopes,phase
         if len(answers)!=len(scopes): raise core.StrataError('Dense video stage count mismatch')
         values=[parsed(answer,scope) for answer,scope in zip(answers,scopes)]
+        if journal is not None:journal.commit()
         if phase=='observe':
             initial.extend(values);all_scopes.extend(sparse_scope(v,s) for v,s in zip(values,scopes))
             next_stage=next_observation()
@@ -273,11 +317,14 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
             requests.append(req)
         scopes=[scope for _,scope in groups];return requests
     answers=core.generate_video_pipeline(connection,[first_req],continuation,
-        capability_check=adapter.native_capability if mode=='native' else None)
+        capability_check=adapter.native_capability if mode=='native' else None,
+        **({'stage_cache':journal} if journal is not None else {}))
     result={'contract_version':1,'mode':mode,'task':task,'analysis':final[0],'segments':initial,
         'source':first.manifest['source'],'coverage':coverage()}
     if speech is not None:result['speech']=speech
     report=final[0]['prompt'] if task=='prompt' else final[0]['report']
+    usage={'requests':len(answers),'stages':[core.json_loads(a[2]) for a in answers]}
+    if journal is not None:usage['checkpoint']={'id':journal.key,'reused_requests':journal.hits,'retention_s':86400}
     outputs=(report,json.dumps(result,ensure_ascii=False),json.dumps(evidence,ensure_ascii=False),
-        json.dumps(coverage(),ensure_ascii=False),json.dumps({'requests':len(answers),'stages':[core.json_loads(a[2]) for a in answers]},ensure_ascii=False))
+        json.dumps(coverage(),ensure_ascii=False),json.dumps(usage,ensure_ascii=False))
     return {'ui':{'text':[report]},'result':outputs}

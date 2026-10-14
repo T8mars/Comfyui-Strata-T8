@@ -72,6 +72,7 @@ class ReleaseTests(unittest.TestCase):
             with mock.patch.object(builder, 'ROOT', root), mock.patch.object(builder.subprocess, 'check_output', return_value=tracked.encode()):
                 builder.main()
             with zipfile.ZipFile(next((root/'dist').glob('*.zip'))) as archive:
+                self.assertIn('Comfyui-Strata-T8/video_progress.py', archive.namelist())
                 self.assertFalse(any('.env' in name or 'profiles/' in name or 'meta.json' in name for name in archive.namelist()))
                 self.assertFalse(any(b'private-key' in archive.read(name) for name in archive.namelist()))
 

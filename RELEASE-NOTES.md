@@ -1,3 +1,13 @@
+## Strata-T8 ComfyUI 1.3.0
+
+Full Video Analyze 新增默认关闭的**自适应采样、跨段末帧参考和进度保存**。开启 `save_progress` 后，同一原片与参数可复用已经校验的分析及汇总响应，保留 24 小时；原片仍需存在，重跑仍会在 CPU 重建帧证据。`progress_key` 留空自动选择任务，`clear_progress` 可清除。
+
+自适应采样保留全程覆盖并将部分预算分配到像素变化附近。跨段参考不重复计入帧覆盖；官方 VIDEO 的裁切、拼接、源 PTS 与 IMAGE 显式时间戳继续保留。新增模块已纳入 Release ZIP。
+
+配套 Strata-T8 **0.1.42-t8.9**，保存进度需运行包提供上下文校验能力。保留 14 个节点 ID、V3/V1、协议 1 和已有语音对白分析；未开启新选项时沿用原工作流行为。CPU/HTTP 与官方 VIDEO/PyTorch 回归覆盖来源校验、末段覆盖和缓存复用；不提供连续播放、对象追踪或真实长片质量保证。
+
+节点 ZIP 不含 Python、引擎或权重。升级后重启 ComfyUI，连接档案保留在节点目录外。[安装与模型路径](https://github.com/T8mars/Comfyui-Strata-T8/blob/v1.3.0/README.md) · [进度设置与验证范围](https://github.com/T8mars/Strata-T8/blob/v0.1.42-t8.9/docs/VIDEO-PROGRESS.zh-CN.md)
+
 ## Strata-T8 ComfyUI 1.2.0
 
 新增 **Speech Transcribe**：VIDEO/AUDIO 转文字、时标 JSON 和 SRT。Video Analyze / Full Video Analyze 可按原时间戳结合对白与画面；`enable_asr` 默认关闭，也可直接输入已有时标字幕，不加载语音模型。转录一次后跨片段复用并按 cue ID 去重。
