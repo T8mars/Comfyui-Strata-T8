@@ -6,6 +6,8 @@
 
 **节点与运行包独立发行。** 本仓库不含模型、Python 或推理引擎；[Strata-T8 整合包](https://github.com/T8mars/Strata-T8) 提供 Python、依赖、CUDA/HIP 引擎，VisionReady 另含视觉权重与配置。
 
+节点 **1.3.0** 已与 Strata-T8 **0.1.44-t8.1**（上游 0.1.44.1）完成真实文本、结构化 JSON、图片、视频及语音转录调用验证。14 个节点 ID 与协议 1 保持兼容，节点和运行包可分别更新。
+
 ## 安装
 
 Registry 版本审核通过后，在 ComfyUI-Manager 搜索 **Strata-T8**，节点 ID `strata-t8`，Publisher `t8star`。尚未显示时可使用 Release ZIP，或在 `ComfyUI/custom_nodes` 中执行：
@@ -21,8 +23,8 @@ Release ZIP 解压到 `custom_nodes/Comfyui-Strata-T8`，确保该目录直接�
 ## 模型与路径
 
 1. 下载 [Strata-T8 VisionReady](https://github.com/T8mars/Strata-T8/releases/latest)，解压为例如 `D:/Strata-T8`。
-2. 收到完整模型数据时，把 `Strata-data` 放在例如 `D:/Strata-data`，运行整合包的 `IMPORT-MODEL.bat` 导入。
-3. 自行下载时运行 `PREPARE-MODEL.bat`，按 ModelScope → 国内镜像 → Hugging Face 获取缺失文件并核对 SHA256；同时准备专家包、分词器和 MTP。仅复制 GGUF 不能替代完整数据目录。
+2. 双击整合包的 **Strata-T8.exe**，在模型设置页选择收到的完整 `Strata-data` 目录，例如 `D:/Strata-data`；模型可放在其他磁盘。`IMPORT-MODEL.bat` 继续可用。
+3. 自行准备时可在模型设置页主动下载并准备官方 IQ3_S，或运行 `PREPARE-MODEL.bat`，按 ModelScope → 国内镜像 → Hugging Face 获取缺失文件并核对 SHA256；同时准备专家包、分词器和 MTP。仅复制 GGUF 不能替代完整数据目录。
 
 ```text
 D:/Strata-T8/                       # 独立运行包
