@@ -1,3 +1,11 @@
+## Strata-T8 ComfyUI 1.3.1
+
+配套 Strata-T8 **0.1.45-t8.1**（上游 v0.1.45），更新兼容性说明与固定版本 CI。保留全部 14 个节点 ID、协议 1、既有工作流和外置连接档案；本版不改变节点的推理和视频算法。
+
+424 项 CPU/HTTP 回归通过。Windows / RTX 4060 Ti 16GB 与 SC117 IQ3_S 完成真实文本、结构化 JSON、图片、语音转录及 12 秒视频时标对白融合；清空 ComfyUI 内存缓存后，5 个阶段从磁盘进度恢复。上述测试不代表长视频理解准确率或其他显卡实测结论。
+
+节点包不含 Python、引擎或模型。请使用 [Strata-T8 整合包](https://github.com/T8mars/Strata-T8/releases/tag/v0.1.45-t8.1)，模型安装与路径见 [README](https://github.com/T8mars/Comfyui-Strata-T8#模型与路径)。Registry 本次不发布。
+
 ## Strata-T8 ComfyUI 1.3.0
 
 Full Video Analyze 新增默认关闭的**自适应采样、跨段末帧参考和进度保存**。开启 `save_progress` 后，同一原片与参数可复用已经校验的分析及汇总响应，保留 24 小时；原片仍需存在，重跑仍会在 CPU 重建帧证据。`progress_key` 留空自动选择任务，`clear_progress` 可清除。
