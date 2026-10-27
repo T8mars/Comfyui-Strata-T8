@@ -801,6 +801,7 @@ def generate_video_pipeline(connection, requests, continuation, *, capability_ch
 
 def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None, stage_cache=None):
     profile = read_profile(connection.profile)
+    if stage_cache is not None:stage_cache.validate_profile(profile)
     needs_vision = any(isinstance(message.get('content'), list)
                       for request in requests for message in request['messages'])
     if needs_vision and profile['mode'] == 'managed' and profile.get('vision', 'gpu') == 'no':

@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import math
+from contextlib import nullcontext
 from . import core
 
 MAX_SEGMENTS = 256
@@ -58,12 +59,7 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
                         for name in ('video_stream.py','video_shared.py','video.py','video_progress.py','core.py','nodes.py')}
         config['profile_context']=fingerprint({k:v for k,v in core.read_profile(connection.profile).items() if k!='api_key'})
         key=fingerprint({'profile':connection.profile,'key':progress_key or fingerprint(config)})
-        if clear_progress:
-            path=core.HOME/'video-progress'/(key+'.json')
-            for item in [path,*path.parents]:
-                if item.is_symlink() or getattr(item,'is_junction',lambda:False)():raise core.StrataError('Linked video progress path')
-            path.unlink(missing_ok=True)
-        journal=Journal(key,config)
+        journal=Journal(key,config,clear=clear_progress)
     if continuity:
         if frames_per_segment<3:raise core.StrataError('Cross-window continuity requires at least 3 frames per segment')
         frames_per_segment-=1
@@ -90,8 +86,12 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
     speech = None
     if enable_asr or timed_transcript.strip():
         from . import speech as speech_tools
-        speech = speech_tools.prepare(connection,video=video,audio=audio,start_s=start_s,end_s=end_s,
-                                      audio_offset_s=audio_offset_s,enable_asr=enable_asr,timed_transcript=timed_transcript)
+        # Speech may start the managed service before the visual pipeline.
+        # Validate queued progress against that profile before either stage.
+        with core.profile_lock(connection.profile) if journal is not None else nullcontext():
+            if journal is not None:journal.validate_profile(core.read_profile(connection.profile))
+            speech = speech_tools.prepare(connection,video=video,audio=audio,start_s=start_s,end_s=end_s,
+                                          audio_offset_s=audio_offset_s,enable_asr=enable_asr,timed_transcript=timed_transcript)
     schema = copy.deepcopy(nodes.VIDEO_SCHEMA)
     schema['properties']['events']['items']['properties']['evidence_frames']['items']['maximum'] = MAX_SEGMENTS*16-1
     if speech is not None:

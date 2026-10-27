@@ -8,6 +8,8 @@ import uuid
 import re
 from . import core
 
+MAX_TOTAL = 128 * 1024**2
+
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode()).hexdigest()
@@ -53,9 +55,11 @@ def source_fingerprint(video,images,audio=None):
 
 
 class Journal:
-    def __init__(self,key,config):
+    def __init__(self,key,config,*,clear=False):
         if not isinstance(key,str) or not re.fullmatch('[0-9a-f]{64}',key):raise core.StrataError('Invalid private video progress identity')
+        if type(clear) is not bool:raise core.StrataError('Invalid video progress clear setting')
         self.key=key;self.pending={};self.hits=0;self.bound=False
+        self.clear_on_bind=clear
         self.directory=core.HOME/'video-progress'
         for path in [self.directory,*self.directory.parents]:
             if path.is_symlink() or getattr(path,'is_junction',lambda:False)():raise core.StrataError('Linked video progress directory')
@@ -67,18 +71,48 @@ class Journal:
             if now-path.stat().st_mtime>86400:path.unlink()
         if len(list(self.directory.glob('*.json')))>=128 and not self.path.exists():raise core.StrataError('Clear older saved video progress before starting another task')
         self.value={'contract_version':1,'config':config,'responses':{},'expires':now+86400}
+        if not clear:self._reload(now)
+
+    def _reload(self,now=None):
+        now=time.time() if now is None else now
+        config=self.value['config']
+        self.value={'contract_version':1,'config':config,'responses':{},'expires':now+86400}
         if self.path.exists():
             if self.path.is_symlink() or self.path.stat().st_size>8*1024**2:raise core.StrataError('Invalid saved video progress')
-            self.value=core.json_loads(self.path.read_text(encoding='utf-8'))
-            if (not isinstance(self.value,dict) or self.value.get('contract_version')!=1
-                    or not isinstance(self.value.get('responses'),dict)
-                    or len(self.value['responses'])>768 or any(not re.fullmatch('[0-9a-f]{64}',k) or not isinstance(v,dict) for k,v in self.value['responses'].items())):
+            saved=core.json_loads(self.path.read_text(encoding='utf-8'))
+            if (not isinstance(saved,dict) or saved.get('contract_version')!=1
+                    or type(saved.get('expires')) not in (int,float)
+                    or not isinstance(saved.get('responses'),dict)
+                    or len(saved['responses'])>768 or any(not re.fullmatch('[0-9a-f]{64}',k) or not isinstance(v,dict) for k,v in saved['responses'].items())):
                 raise core.StrataError('Invalid saved video response journal')
-            if self.value.get('config')!=config:raise core.StrataError('Saved video source or analysis options changed')
+            if saved['expires']<=now:
+                # File copies and restores can refresh mtime; the persisted
+                # expiration still bounds reuse to the promised 24 hours.
+                self.path.unlink()
+            else:
+                if saved.get('config')!=config:raise core.StrataError('Saved video source or analysis options changed')
+                self.value=saved
+
+    def validate_profile(self,profile):
+        # Called with the actual profile under its lease, before service startup.
+        expected=self.value['config'].get('profile_context')
+        if expected is not None and fingerprint({k:v for k,v in profile.items() if k!='api_key'})!=expected:
+            raise core.StrataError('Service profile changed while video analysis was queued; run it again')
 
     def bind(self,status,client,check):
         # Runtime signature excludes uptime and instance ID, so restarting the
         # same software/model can reuse progress; a software/config change cannot.
+        # Construction happens before acquiring the profile/service lease. A
+        # queued run must re-read stages (or a clear) committed while it waited.
+        if not self.bound:
+            # Clearing before the lease lets an older running task resurrect
+            # its stages. Defer until it has finished and this run owns the lease.
+            if self.clear_on_bind:
+                if self.path.is_symlink() or getattr(self.path,'is_junction',lambda:False)():
+                    raise core.StrataError('Linked video progress path')
+                self.path.unlink(missing_ok=True)
+                self.clear_on_bind=False
+            self._reload()
         cap=client.request('/v1/video/capabilities',check=check,timeout=5)
         signature=cap.get('runtime_context')
         if not isinstance(signature,str) or len(signature)!=64:raise core.StrataError('Saving progress requires a runtime with a video configuration fingerprint')
@@ -104,7 +138,9 @@ class Journal:
         value={**self.value,'responses':merged,'expires':time.time()+86400}
         raw=json.dumps(value,ensure_ascii=False,allow_nan=False).encode()
         if len(raw)>8*1024**2:raise core.StrataError('Video checkpoint exceeds 8 MiB')
-        if sum(p.stat().st_size for p in self.directory.glob('*.json') if not p.is_symlink())+len(raw)>128*1024**2:raise core.StrataError('Local video checkpoint storage is full')
+        # The atomic replacement supersedes this journal's previous bytes.
+        # Counting both versions rejects valid updates near the total quota.
+        if sum(p.stat().st_size for p in self.directory.glob('*.json') if p!=self.path and not p.is_symlink())+len(raw)>MAX_TOTAL:raise core.StrataError('Local video checkpoint storage is full')
         temp=self.path.with_suffix('.'+uuid.uuid4().hex+'.tmp')
         try:
             with temp.open('xb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
