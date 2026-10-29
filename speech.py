@@ -169,7 +169,8 @@ def prepare(connection,*,video=None,audio=None,start_s=0,end_s=None,audio_offset
     profile=core.read_profile(connection.profile);client=core.Client(profile)
     manager=core.Managed(connection.profile,profile) if profile['mode']=='managed' else None
     with core.service_lock(profile):
-        owned_status=manager.ensure(client,check=core.interrupted) if manager else None
+        owned_status=manager.ensure(client,check=core.interrupted,
+            prepare_check=lambda: core.gpu_handoff(profile) if profile.get('same_gpu') else None) if manager else None
         response=client.request('/v1/asr/settings',check=core.interrupted)
         settings=response['settings']; capability=response['capabilities']
         if audio is not None:
@@ -191,9 +192,11 @@ def prepare(connection,*,video=None,audio=None,start_s=0,end_s=None,audio_offset
             if profile.get('same_gpu'):asr_gpu_handoff()
         payload=base64.b64encode(wav_bytes(array,rate)).decode('ascii')
         prepared_file = audio is None and clock.get('clock') not in ('component_audio','composite_complete_audio')
-        result=contract.transcript(client.request('/v1/audio/transcribe',{'data':payload,'start_s':0,'end_s':(end_s-start_s),
-                                                  'audio_track':0,'channel':'mean' if prepared_file else settings.get('channel','mean'),
-                                                  'offset_ms':0},
+        request={'data':payload,'start_s':0,'end_s':(end_s-start_s),
+                 'audio_track':0,'channel':'mean' if prepared_file else settings.get('channel','mean'),'offset_ms':0}
+        if capability.get('expected_device_guard') is True:
+            request['expected_device']=settings['device']
+        result=contract.transcript(client.request('/v1/audio/transcribe',request,
                                                   check=core.interrupted,timeout=max(180,(end_s-start_s)*60)))
         # Both service timelines start at this freshly uploaded WAV's zero.
         # Normalize before adding input origin so selected_window is not added twice.

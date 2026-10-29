@@ -1,3 +1,14 @@
+## Strata-T8 ComfyUI 1.3.3
+
+配套 [Strata-T8 0.2.6-t8.2](https://github.com/T8mars/Strata-T8/releases/tag/v0.2.6-t8.2)，保留 14 个节点 ID、协议 1、既有工作流和外置连接档案。
+
+- 自动语音与画面分析共用档案锁，阶段间核对配置和设备；准备服务使用既有显存交接回调，保留旧运行包能力协商。
+- 修复生成、采样和 Control 最终阶段的取消处理，释放资源后仍报告取消。
+- 视频进度启动清理保留未知 JSON、目录和链接；其他旧文件的 I/O 错误不阻断无关初始化，当前记录校验及配额保持严格。
+- 同步主端语音契约，巨大时标和时长换算溢出显示输入错误，保留正常中文字幕及原有采样舍入。
+
+CPU/HTTP 回归覆盖取消、配置变化、手工字幕、旧版兼容和进度恢复。本轮未重新运行大模型 GPU 推理。节点 ZIP 不含 Python、引擎或模型，更新后重启 ComfyUI；连接档案保留在节点目录外。[安装与模型路径](https://github.com/T8mars/Comfyui-Strata-T8/blob/v1.3.3/README.md#模型与路径)。Registry 本次不发布。
+
 ## Strata-T8 ComfyUI 1.3.2
 
 配套 [Strata-T8 0.2.6-t8.1](https://github.com/T8mars/Strata-T8/releases/tag/v0.2.6-t8.1)，保留 14 个节点 ID、协议 1 和已有工作流。

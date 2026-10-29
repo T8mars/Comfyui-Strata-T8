@@ -84,12 +84,15 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
     if count > MAX_SEGMENTS:
         raise core.StrataError(f'Video needs {count} segments; select a shorter duration or lower sampling_fps (max {MAX_SEGMENTS} segments)')
     speech = None
+    speech_profile = None
     if enable_asr or timed_transcript.strip():
         from . import speech as speech_tools
         # Speech may start the managed service before the visual pipeline.
         # Validate queued progress against that profile before either stage.
-        with core.profile_lock(connection.profile) if journal is not None else nullcontext():
+        automatic_speech = enable_asr and not timed_transcript.strip()
+        with core.profile_lock(connection.profile) if journal is not None or automatic_speech else nullcontext():
             if journal is not None:journal.validate_profile(core.read_profile(connection.profile))
+            if automatic_speech:speech_profile=core.read_profile(connection.profile)
             speech = speech_tools.prepare(connection,video=video,audio=audio,start_s=start_s,end_s=end_s,
                                           audio_offset_s=audio_offset_s,enable_asr=enable_asr,timed_transcript=timed_transcript)
     schema = copy.deepcopy(nodes.VIDEO_SCHEMA)
@@ -318,6 +321,7 @@ def run(connection, *, video=None, images=None, fps=24, timestamps_json='', star
         scopes=[scope for _,scope in groups];return requests
     answers=core.generate_video_pipeline(connection,[first_req],continuation,
         capability_check=adapter.native_capability if mode=='native' else None,
+        **({'expected_profile':speech_profile} if speech_profile is not None else {}),
         **({'stage_cache':journal} if journal is not None else {}))
     result={'contract_version':1,'mode':mode,'task':task,'analysis':final[0],'segments':initial,
         'source':first.manifest['source'],'coverage':coverage()}

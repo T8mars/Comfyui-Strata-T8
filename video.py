@@ -429,7 +429,9 @@ def tensor_result(sampled):
         # Samples were capped and downscaled before this CPU-only stack.
         tensors.append(torch.from_numpy(np.asarray(image, dtype=np.float32).copy() / 255))
     core.interrupted()
-    return torch.stack(tensors), json.dumps(sampled.manifest, ensure_ascii=False, allow_nan=False)
+    result = torch.stack(tensors), json.dumps(sampled.manifest, ensure_ascii=False, allow_nan=False)
+    core.interrupted()
+    return result
 
 
 def frame_measurements(image, content_box=None):

@@ -6,7 +6,7 @@
 
 **节点与运行包独立发行。** 本仓库不含模型、Python 或推理引擎；[Strata-T8 整合包](https://github.com/T8mars/Strata-T8) 提供 Python、依赖、CUDA/HIP 引擎，VisionReady 另含视觉权重与配置。
 
-节点 **1.3.2** 配套 Strata-T8 **0.2.6-t8.1**（上游 0.2.6），14 个节点 ID 与协议 1 保持兼容，节点和运行包可分别更新。本版修复视频进度到期、清除和排队期间连接配置变化的问题，438 项 CPU/HTTP 回归通过。此前的真实文字、图片、视频和对白融合测试范围见[运行包验收记录](https://github.com/T8mars/Strata-T8/blob/v0.2.6-t8.1/docs/VALIDATION-UPSTREAM-026-T8.md)，不代表本次重新测试了所有显卡和模型。
+节点 **1.3.3** 配套 Strata-T8 **0.2.6-t8.2**（上游 0.2.6），14 个节点 ID 与协议 1 保持兼容，节点和运行包可分别更新。本版修复语音与视觉阶段的配置一致性、迟到取消、旧运行包协商和视频进度清理，并同步语音输入校验。[修复范围](https://github.com/T8mars/Strata-T8/blob/v0.2.6-t8.2/docs/AUDIT-026-POSTRELEASE-T8.md)。此前真实文字、图片、视频和对白融合的测试范围见[运行包验收记录](https://github.com/T8mars/Strata-T8/blob/v0.2.6-t8.1/docs/VALIDATION-UPSTREAM-026-T8.md)，不代表本次重新测试了所有显卡和模型。
 
 ## 安装
 

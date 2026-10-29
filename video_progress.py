@@ -67,8 +67,12 @@ class Journal:
         self.path=self.directory/(key+'.json')
         now=time.time()
         for path in self.directory.glob('*.json'):
-            if path.is_symlink():continue
-            if now-path.stat().st_mtime>86400:path.unlink()
+            if not re.fullmatch('[0-9a-f]{64}',path.stem):continue
+            try:
+                if path.is_symlink() or getattr(path,'is_junction',lambda:False)() or not path.is_file():continue
+                if now-path.stat().st_mtime>86400:path.unlink()
+            except OSError:
+                continue  # An unavailable old journal must not block unrelated work.
         if len(list(self.directory.glob('*.json')))>=128 and not self.path.exists():raise core.StrataError('Clear older saved video progress before starting another task')
         self.value={'contract_version':1,'config':config,'responses':{},'expires':now+86400}
         if not clear:self._reload(now)

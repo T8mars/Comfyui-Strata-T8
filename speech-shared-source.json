@@ -1,12 +1,12 @@
 {
   "repository": "T8mars/Strata-T8",
-  "commit": "dea1fc08f1988b8210c7f8c7450c96cf5b89d02c",
+  "commit": "b10b9afb6d09d21df7d1656664acac73e7fabacd",
   "source_working_tree_modified": false,
   "files": {
     "speech_contract.py": {
       "source_path": "serve/asr/contract.py",
-      "source_sha256": "8f8c6927e85e7cbd26bf6fe9b8cc6a60625182d00f1fabdc01d08152ff8673e3",
-      "sha256": "8f8c6927e85e7cbd26bf6fe9b8cc6a60625182d00f1fabdc01d08152ff8673e3"
+      "source_sha256": "4f98854983c841ad79980016906237b5b22029dfe88b822bebaed51a001d77b3",
+      "sha256": "4f98854983c841ad79980016906237b5b22029dfe88b822bebaed51a001d77b3"
     },
     "speech_media.py": {
       "source_path": "serve/asr/media.py",

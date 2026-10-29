@@ -4,6 +4,7 @@ import copy
 import hashlib
 import math
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from . import core, video as video_tools
 
@@ -214,7 +215,7 @@ def validated(text, schema):
     try:
         value = core.json_loads(text)
         validator.validate(value)
-    except (core.StrataError, ValueError, ValidationError, RecursionError, Unresolvable):
+    except (core.StrataError, ValueError, OverflowError, ValidationError, RecursionError, Unresolvable):
         raise StructuredOutputError('Model output is not valid JSON matching the schema') from None
     return value
 
@@ -548,14 +549,11 @@ class StrataVideoAnalyze(Base):
         if any(not 0 <= frame['index'] <= 63 for frame in manifest['frames']):
             raise core.StrataError('Video evidence frame IDs must be between 0 and 63')
         speech = None
+        speech_profile = None
         schema = copy.deepcopy(VIDEO_SCHEMA)
         if type(enable_asr) is not bool or not isinstance(timed_transcript,str):
             raise core.StrataError('Invalid optional ASR/timed transcript settings')
         if enable_asr or timed_transcript.strip():
-            from . import speech as speech_tools
-            speech = speech_tools.prepare(connection,audio=audio,start_s=manifest['sampling']['start_s'],
-                end_s=manifest['sampling']['end_s'],audio_offset_s=audio_offset_s,
-                enable_asr=enable_asr,timed_transcript=timed_transcript)
             schema['properties']['dialogue'] = {'type':'array','maxItems':64,'items':{
                 'type':'object','additionalProperties':False,'required':['cue_ids','observation'],
                 'properties':{'cue_ids':{'type':'array','minItems':1,'maxItems':16,'uniqueItems':True,
@@ -571,6 +569,15 @@ class StrataVideoAnalyze(Base):
             raise core.StrataError('Video manifest dimensions do not match the sampled IMAGE tensor')
         encoded = core.encode_images(frames, max_images=64, max_pixels=max_pixels)
         core.interrupted()
+        if enable_asr or timed_transcript.strip():
+            from . import speech as speech_tools
+            automatic_speech = enable_asr and not timed_transcript.strip()
+            with core.profile_lock(connection.profile) if automatic_speech else nullcontext():
+                if automatic_speech:
+                    speech_profile = core.read_profile(connection.profile)
+                speech = speech_tools.prepare(connection,audio=audio,start_s=manifest['sampling']['start_s'],
+                    end_s=manifest['sampling']['end_s'],audio_offset_s=audio_offset_s,
+                    enable_asr=enable_asr,timed_transcript=timed_transcript)
         evidence = manifest['frames']
         instruction = (selected + ' These are sampled frames in chronological order, not continuous full-rate video. '
                        'Use only provided frame IDs and relative timestamps. Never invent unseen motion or audio. '
@@ -689,7 +696,8 @@ class StrataVideoAnalyze(Base):
             return requests
 
         answers = core.generate_pipeline(connection, static, continuation, max_followups=32,
-                                         capability_check=video_tools.native_capability if mode == 'native' else None)
+            capability_check=video_tools.native_capability if mode == 'native' else None,
+            **({'expected_profile':speech_profile} if speech_profile is not None else {}))
         result = {'contract_version': 1, 'mode': mode, 'task': task, 'analysis': final[0],
                   'segments': initial, 'source': manifest.get('source', {}), 'coverage': manifest.get('coverage', {})}
         if speech is not None: result['speech'] = speech
@@ -752,7 +760,12 @@ class StrataSpeechTranscribe(Base):
         from . import speech
         start=video_tools.number(start_s,'start_s',high=86400)
         duration=video_tools.number(duration_s,'duration_s',high=3600,positive=True)
-        result=speech.prepare(connection,start_s=start,end_s=start+duration,enable_asr=enable_asr,**kwargs)
+        transcript=kwargs.get('timed_transcript','')
+        automatic=enable_asr is True and isinstance(transcript,str) and not transcript.strip()
+        # Keep profile edits queued until this automatic transcription finishes.
+        # Disabled speech and imported subtitles do not need a service lease.
+        with core.profile_lock(connection.profile) if automatic else nullcontext():
+            result=speech.prepare(connection,start_s=start,end_s=start+duration,enable_asr=enable_asr,**kwargs)
         if result is None:
             return ('','', '')
         return ('\n'.join(cue['text'] for cue in result['cues']),json.dumps(result,ensure_ascii=False),speech.srt(result))

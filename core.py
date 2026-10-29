@@ -774,7 +774,7 @@ def generate(connection, requests):
         return _generate(connection, requests)
 
 
-def generate_pipeline(connection, requests, continuation, *, max_followups=32, capability_check=None):
+def generate_pipeline(connection, requests, continuation, *, max_followups=32, capability_check=None, expected_profile=None):
     """Dependent summaries share the original service lease and its single cleanup.
 
     All static image conversion and request validation precede the lease. The callback
@@ -787,20 +787,24 @@ def generate_pipeline(connection, requests, continuation, *, max_followups=32, c
     if capability_check is not None and not callable(capability_check):
         raise StrataError('Invalid capability check')
     with profile_lock(connection.profile):
-        return _generate(connection, requests, continuation, max_followups, capability_check)
+        return _generate(connection, requests, continuation, max_followups, capability_check,
+                         expected_profile=expected_profile)
 
 
-def generate_video_pipeline(connection, requests, continuation, *, capability_check=None, stage_cache=None):
+def generate_video_pipeline(connection, requests, continuation, *, capability_check=None, stage_cache=None, expected_profile=None):
     """Opt-in streamed video stages share one lease with a bounded 512-call tail."""
     validate_requests(requests)
     if not callable(continuation) or (capability_check is not None and not callable(capability_check)):
         raise StrataError('Invalid streaming video pipeline')
     with profile_lock(connection.profile):
-        return _generate(connection, requests, continuation, 512, capability_check, stage_cache=stage_cache)
+        return _generate(connection, requests, continuation, 512, capability_check, stage_cache=stage_cache,
+                         expected_profile=expected_profile)
 
 
-def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None, stage_cache=None):
+def _generate(connection, requests, continuation=None, max_followups=32, capability_check=None, stage_cache=None, expected_profile=None):
     profile = read_profile(connection.profile)
+    if expected_profile is not None and profile != expected_profile:
+        raise StrataError('Service profile changed after speech preparation; run video analysis again')
     if stage_cache is not None:stage_cache.validate_profile(profile)
     needs_vision = any(isinstance(message.get('content'), list)
                       for request in requests for message in request['messages'])
@@ -882,17 +886,26 @@ def _generate(connection, requests, continuation=None, max_followups=32, capabil
                             raise StrataError('Generation pipeline exceeded its follow-up request limit')
                         pending = list(next_stage)
                         stage_start = len(answers)
-            return answers
         finally:
             if cleanup_required:
                 cleanup(client, profile, manager, baseline)
+        # Release is deliberately independent of cancellation. Check once more
+        # after it completes so Stop during release cannot publish an answer.
+        interrupted()
+        return answers
 
 
 def control(connection, action, check=interrupted):
     if action == 'status':
-        return _control(connection, action, check)
-    with profile_lock(connection.profile, check):
-        return _control(connection, action, check)
+        result = _control(connection, action, check)
+    else:
+        with profile_lock(connection.profile, check):
+            result = _control(connection, action, check)
+    # Lifecycle release stays independent of cancellation. Observe Stop only
+    # once it has finished, so cancelled controls cannot publish passthrough.
+    if check:
+        check()
+    return result
 
 
 def _control(connection, action, check=interrupted):

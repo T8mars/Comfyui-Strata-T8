@@ -1,6 +1,6 @@
 [project]
 name = "strata-t8"
-version = "1.3.2"
+version = "1.3.3"
 description = "Strata text, structured prompts, vision and timed video/dialogue analysis with optional local speech transcription."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
